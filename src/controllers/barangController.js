@@ -2,13 +2,14 @@ const pool = require('../config/db');
 
 exports.getAll = async (req, res) => {
   try {
-    const { search } = req.query;
+    const { search, jenis } = req.query;
     let sql = `SELECT b.*,
       (SELECT hargabeli FROM hargabeli WHERE idbarang = b.idbarang ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1) as hargabeli_terbaru,
       (SELECT hargajual FROM hargajual WHERE idbarang = b.idbarang ORDER BY tgltrans DESC, idhargajual DESC LIMIT 1) as hargajual_terbaru
     FROM barang b WHERE 1=1`;
     const params = [];
     if (search) { sql += ' AND (b.namabarang LIKE ? OR b.kodebarang LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
+    if (jenis) { sql += ' AND b.jenis = ?'; params.push(jenis); }
     sql += ' ORDER BY b.idbarang DESC';
     const [rows] = await pool.query(sql, params);
     res.json(rows);
@@ -34,17 +35,16 @@ exports.create = async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    const { namabarang, satuan, stokmin, hargabeli, hargajual } = req.body;
+    const { namabarang, satuanbesar, satuansedang, satuankecil, konversi1, konversi2, jenis, stokmin, hargabeli, hargajual } = req.body;
 
-    // Generate kode
     const [[{ maxKode }]] = await conn.query('SELECT MAX(kodebarang) as maxKode FROM barang');
     let num = 1;
     if (maxKode) { const parts = maxKode.split('-'); num = parseInt(parts[1]) + 1; }
     const kodebarang = `BRG-${String(num).padStart(4, '0')}`;
 
     const [result] = await conn.query(
-      'INSERT INTO barang (kodebarang, namabarang, satuan, stokmin) VALUES (?, ?, ?, ?)',
-      [kodebarang, namabarang, satuan, stokmin || 0]
+      'INSERT INTO barang (kodebarang, namabarang, satuanbesar, satuansedang, satuankecil, konversi1, konversi2, jenis, stokmin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [kodebarang, namabarang, satuanbesar, satuansedang, satuankecil, konversi1 || 0, konversi2 || 0, jenis || 'BAHAN JADI', stokmin || 0]
     );
     const idbarang = result.insertId;
     const today = new Date().toISOString().slice(0, 10);
@@ -70,14 +70,26 @@ exports.update = async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    const { namabarang, satuan, stokmin, hargabeli, hargajual, status } = req.body;
+    const { namabarang, satuanbesar, satuansedang, satuankecil, konversi1, konversi2, jenis, stokmin, hargabeli, hargajual, status } = req.body;
     const { id } = req.params;
 
     const [barang] = await conn.query('SELECT * FROM barang WHERE idbarang = ?', [id]);
     if (barang.length === 0) return res.status(404).json({ message: 'Barang tidak ditemukan' });
 
-    await conn.query('UPDATE barang SET namabarang = ?, satuan = ?, stokmin = ?, status = ? WHERE idbarang = ?',
-      [namabarang || barang[0].namabarang, satuan || barang[0].satuan, stokmin ?? barang[0].stokmin, status ?? barang[0].status, id]);
+    await conn.query(
+      'UPDATE barang SET namabarang = ?, satuanbesar = ?, satuansedang = ?, satuankecil = ?, konversi1 = ?, konversi2 = ?, jenis = ?, stokmin = ?, status = ? WHERE idbarang = ?',
+      [
+        namabarang || barang[0].namabarang,
+        satuanbesar ?? barang[0].satuanbesar,
+        satuansedang ?? barang[0].satuansedang,
+        satuankecil ?? barang[0].satuankecil,
+        konversi1 ?? barang[0].konversi1,
+        konversi2 ?? barang[0].konversi2,
+        jenis || barang[0].jenis,
+        stokmin ?? barang[0].stokmin,
+        status ?? barang[0].status, id
+      ]
+    );
 
     const today = new Date().toISOString().slice(0, 10);
 

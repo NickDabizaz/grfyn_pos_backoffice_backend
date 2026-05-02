@@ -13,6 +13,10 @@ const stokRoutes = require('./routes/stok');
 const laporanRoutes = require('./routes/laporan');
 const dashboardRoutes = require('./routes/dashboard');
 const settingRoutes = require('./routes/setting');
+const resepRoutes = require('./routes/resep');
+const akunRoutes = require('./routes/akun');
+const kasRoutes = require('./routes/kas');
+const imporRoutes = require('./routes/impor');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -37,6 +41,10 @@ app.use('/api/stok', stokRoutes);
 app.use('/api/laporan', laporanRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/setting', settingRoutes);
+app.use('/api/resep', resepRoutes);
+app.use('/api/akun', akunRoutes);
+app.use('/api/kas', kasRoutes);
+app.use('/api/impor', imporRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date() });

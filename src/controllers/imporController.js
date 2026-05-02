@@ -1,0 +1,444 @@
+const pool = require('../config/db');
+const fs = require('fs');
+
+function parseCSV(content) {
+  const lines = content.replace(/\r/g, '').split('\n').filter(l => l.trim());
+  if (!lines.length) return { headers: [], rows: [] };
+  const delimiter = lines[0].includes(';') ? ';' : ',';
+  const headers = lines[0].split(delimiter).map(h => h.trim().toLowerCase());
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const vals = lines[i].split(delimiter).map(v => v.trim());
+    if (vals.length < headers.length) continue;
+    const row = {};
+    headers.forEach((h, idx) => { row[h] = vals[idx] || ''; });
+    rows.push(row);
+  }
+  return { headers, rows };
+}
+
+function generateCSV(headers, rows) {
+  let csv = '\uFEFF'; // BOM for Excel UTF-8
+  csv += headers.join(',') + '\n';
+  for (const row of rows) {
+    const escaped = headers.map(h => {
+      const val = String(row[h] !== undefined ? row[h] : '');
+      if (val.includes(',') || val.includes('"') || val.includes('\n')) {
+        return '"' + val.replace(/"/g, '""') + '"';
+      }
+      return val;
+    });
+    csv += escaped.join(',') + '\n';
+  }
+  return csv;
+}
+
+function sendCSV(res, filename, headers, rows) {
+  const csv = generateCSV(headers, rows);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(csv);
+}
+
+// ==================== EXPORT ====================
+
+exports.exportBarang = async (req, res) => {
+  try {
+    const [rows] = await pool.query(`SELECT b.kodebarang, b.namabarang, b.satuanbesar, b.satuansedang, b.satuankecil,
+      b.konversi1, b.konversi2, b.jenis, b.stokmin, b.status,
+      (SELECT hargabeli FROM hargabeli WHERE idbarang = b.idbarang ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1) as hargabeli,
+      (SELECT hargajual FROM hargajual WHERE idbarang = b.idbarang ORDER BY tgltrans DESC, idhargajual DESC LIMIT 1) as hargajual
+    FROM barang b ORDER BY b.kodebarang`);
+
+    const headers = ['kodebarang', 'namabarang', 'satuanbesar', 'satuansedang', 'satuankecil', 'konversi1', 'konversi2', 'jenis', 'stokmin', 'status', 'hargabeli', 'hargajual'];
+    sendCSV(res, 'barang.csv', headers, rows);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+exports.exportCustomer = async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT kodecustomer, namacustomer, alamat, hp FROM customer ORDER BY idcustomer');
+    sendCSV(res, 'customer.csv', ['kodecustomer', 'namacustomer', 'alamat', 'hp'], rows);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+exports.exportSupplier = async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT kodesupplier, namasupplier, alamat, hp FROM supplier ORDER BY idsupplier');
+    sendCSV(res, 'supplier.csv', ['kodesupplier', 'namasupplier', 'alamat', 'hp'], rows);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+exports.exportBeli = async (req, res) => {
+  try {
+    const [rows] = await pool.query(`SELECT b.kodebeli, b.tgltrans, s.kodesupplier, s.namasupplier,
+      br.kodebarang, br.namabarang, bd.jml, bd.harga, bd.ppn, bd.diskon, bd.subtotal,
+      b.grandtotal, b.bayar, b.status
+    FROM belidtl bd
+    JOIN beli b ON bd.idbeli = b.idbeli
+    LEFT JOIN supplier s ON b.idsupplier = s.idsupplier
+    LEFT JOIN barang br ON bd.idbarang = br.idbarang
+    ORDER BY b.tgltrans DESC, b.idbeli DESC`);
+
+    const headers = ['kodebeli', 'tgltrans', 'kodesupplier', 'namasupplier', 'kodebarang', 'namabarang', 'jml', 'harga', 'ppn', 'diskon', 'subtotal', 'grandtotal', 'bayar', 'status'];
+    sendCSV(res, 'pembelian.csv', headers, rows);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+exports.exportJual = async (req, res) => {
+  try {
+    const [rows] = await pool.query(`SELECT j.kodejual, j.tgltrans, c.kodecustomer, c.namacustomer,
+      br.kodebarang, br.namabarang, jd.jml, jd.harga, jd.ppn, jd.diskon, jd.subtotal,
+      j.grandtotal, j.bayar, j.kembali, j.status
+    FROM jualdtl jd
+    JOIN jual j ON jd.idjual = j.idjual
+    LEFT JOIN customer c ON j.idcustomer = c.idcustomer
+    LEFT JOIN barang br ON jd.idbarang = br.idbarang
+    ORDER BY j.tgltrans DESC, j.idjual DESC`);
+
+    const headers = ['kodejual', 'tgltrans', 'kodecustomer', 'namacustomer', 'kodebarang', 'namabarang', 'jml', 'harga', 'ppn', 'diskon', 'subtotal', 'grandtotal', 'bayar', 'kembali', 'status'];
+    sendCSV(res, 'penjualan.csv', headers, rows);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// ==================== IMPORT ====================
+
+exports.importBarang = async (req, res) => {
+  if (!req.file) return res.status(400).json({ message: 'File tidak ditemukan' });
+  const conn = await pool.getConnection();
+  try {
+    const content = fs.readFileSync(req.file.path, 'utf-8');
+    const { rows } = parseCSV(content);
+    if (!rows.length) return res.status(400).json({ message: 'Data kosong' });
+
+    await conn.beginTransaction();
+    const today = new Date().toISOString().slice(0, 10);
+    let success = 0;
+    const errors = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r.namabarang) { errors.push({ row: i + 2, message: 'namabarang wajib diisi' }); continue; }
+
+      try {
+        const [[{ maxKode }]] = await conn.query('SELECT MAX(kodebarang) as maxKode FROM barang');
+        let num = 1;
+        if (maxKode) { const parts = maxKode.split('-'); num = parseInt(parts[1]) + 1; }
+        const kodebarang = `BRG-${String(num).padStart(4, '0')}`;
+
+        const [result] = await conn.query(
+          'INSERT INTO barang (kodebarang, namabarang, satuanbesar, satuansedang, satuankecil, konversi1, konversi2, jenis, stokmin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [kodebarang, r.namabarang, r.satuanbesar || '', r.satuansedang || '', r.satuankecil || '', parseInt(r.konversi1) || 0, parseInt(r.konversi2) || 0, r.jenis || 'BAHAN JADI', parseInt(r.stokmin) || 0]
+        );
+        const idbarang = result.insertId;
+
+        if (r.hargabeli && parseFloat(r.hargabeli) > 0) {
+          await conn.query('INSERT INTO hargabeli (idbarang, hargabeli, tgltrans) VALUES (?, ?, ?)', [idbarang, parseFloat(r.hargabeli), today]);
+        }
+        if (r.hargajual && parseFloat(r.hargajual) > 0) {
+          await conn.query('INSERT INTO hargajual (idbarang, hargajual, tgltrans) VALUES (?, ?, ?)', [idbarang, parseFloat(r.hargajual), today]);
+        }
+        success++;
+      } catch (e) {
+        errors.push({ row: i + 2, message: e.message });
+      }
+    }
+
+    await conn.commit();
+    res.json({ message: `Berhasil import ${success} barang`, success, errors });
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ message: err.message });
+  } finally {
+    conn.release();
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+  }
+};
+
+exports.importCustomer = async (req, res) => {
+  if (!req.file) return res.status(400).json({ message: 'File tidak ditemukan' });
+  const conn = await pool.getConnection();
+  try {
+    const content = fs.readFileSync(req.file.path, 'utf-8');
+    const { rows } = parseCSV(content);
+    if (!rows.length) return res.status(400).json({ message: 'Data kosong' });
+
+    await conn.beginTransaction();
+    let success = 0;
+    const errors = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r.namacustomer) { errors.push({ row: i + 2, message: 'namacustomer wajib diisi' }); continue; }
+
+      try {
+        const [[{ maxKode }]] = await conn.query('SELECT MAX(kodecustomer) as maxKode FROM customer');
+        let num = 1;
+        if (maxKode) { const parts = maxKode.split('-'); num = parseInt(parts[1]) + 1; }
+        const kodecustomer = `CST-${String(num).padStart(4, '0')}`;
+
+        await conn.query('INSERT INTO customer (kodecustomer, namacustomer, alamat, hp) VALUES (?, ?, ?, ?)',
+          [kodecustomer, r.namacustomer, r.alamat || '', r.hp || '']);
+        success++;
+      } catch (e) {
+        errors.push({ row: i + 2, message: e.message });
+      }
+    }
+
+    await conn.commit();
+    res.json({ message: `Berhasil import ${success} customer`, success, errors });
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ message: err.message });
+  } finally {
+    conn.release();
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+  }
+};
+
+exports.importSupplier = async (req, res) => {
+  if (!req.file) return res.status(400).json({ message: 'File tidak ditemukan' });
+  const conn = await pool.getConnection();
+  try {
+    const content = fs.readFileSync(req.file.path, 'utf-8');
+    const { rows } = parseCSV(content);
+    if (!rows.length) return res.status(400).json({ message: 'Data kosong' });
+
+    await conn.beginTransaction();
+    let success = 0;
+    const errors = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r.namasupplier) { errors.push({ row: i + 2, message: 'namasupplier wajib diisi' }); continue; }
+
+      try {
+        const [[{ maxKode }]] = await conn.query('SELECT MAX(kodesupplier) as maxKode FROM supplier');
+        let num = 1;
+        if (maxKode) { const parts = maxKode.split('-'); num = parseInt(parts[1]) + 1; }
+        const kodesupplier = `SUP-${String(num).padStart(4, '0')}`;
+
+        await conn.query('INSERT INTO supplier (kodesupplier, namasupplier, alamat, hp) VALUES (?, ?, ?, ?)',
+          [kodesupplier, r.namasupplier, r.alamat || '', r.hp || '']);
+        success++;
+      } catch (e) {
+        errors.push({ row: i + 2, message: e.message });
+      }
+    }
+
+    await conn.commit();
+    res.json({ message: `Berhasil import ${success} supplier`, success, errors });
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ message: err.message });
+  } finally {
+    conn.release();
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+  }
+};
+
+exports.importBeli = async (req, res) => {
+  if (!req.file) return res.status(400).json({ message: 'File tidak ditemukan' });
+  const conn = await pool.getConnection();
+  try {
+    const content = fs.readFileSync(req.file.path, 'utf-8');
+    const { rows } = parseCSV(content);
+    if (!rows.length) return res.status(400).json({ message: 'Data kosong' });
+
+    await conn.beginTransaction();
+
+    const tgltrans = rows[0].tgltrans || new Date().toISOString().slice(0, 10);
+    const idsupplier = parseInt(rows[0].idsupplier) || 1;
+
+    const dateStr = tgltrans.replace(/-/g, '');
+    const [[{ cnt }]] = await conn.query(`SELECT COUNT(*) as cnt FROM beli WHERE kodebeli LIKE ?`, [`PB-${dateStr}-%`]);
+    const num = String(cnt + 1).padStart(4, '0');
+    const kodebeli = `PB-${dateStr}-${num}`;
+
+    let grandtotal = 0;
+    for (const r of rows) {
+      const subtotal = parseFloat(r.subtotal) || (parseFloat(r.harga) || 0) * (parseInt(r.jml) || 0);
+      grandtotal += subtotal;
+    }
+
+    await conn.query(
+      'INSERT INTO beli (kodebeli, tgltrans, idsupplier, idkasir, grandtotal, bayar) VALUES (?, ?, ?, ?, ?, ?)',
+      [kodebeli, tgltrans, idsupplier, 1, grandtotal, 0]
+    );
+
+    const [[header]] = await conn.query('SELECT idbeli FROM beli WHERE kodebeli = ?', [kodebeli]);
+
+    let success = 0;
+    const errors = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r.kodebarang) { errors.push({ row: i + 2, message: 'kodebarang wajib diisi' }); continue; }
+
+      try {
+        const [[barang]] = await conn.query('SELECT idbarang FROM barang WHERE kodebarang = ?', [r.kodebarang]);
+        if (!barang) { errors.push({ row: i + 2, message: `Barang ${r.kodebarang} tidak ditemukan` }); continue; }
+
+        const jml = parseInt(r.jml) || 0;
+        const harga = parseFloat(r.harga) || 0;
+        const ppn = parseFloat(r.ppn) || 0;
+        const diskon = parseFloat(r.diskon) || 0;
+        const subtotal = parseFloat(r.subtotal) || (harga * jml) + ppn - (harga * jml * diskon / 100);
+
+        await conn.query(
+          'INSERT INTO belidtl (idbeli, kodebeli, idbarang, jml, harga, ppn, diskon, subtotal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [header.idbeli, kodebeli, barang.idbarang, jml, harga, ppn, diskon, subtotal]
+        );
+
+        await conn.query(
+          'INSERT INTO kartustok (kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [kodebeli, barang.idbarang, jml, 'M', tgltrans, `Import pembelian ${kodebeli}`, header.idbeli, 'beli']
+        );
+
+        const [[latest]] = await conn.query(
+          'SELECT hargabeli FROM hargabeli WHERE idbarang = ? ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1',
+          [barang.idbarang]
+        );
+        if (!latest || parseFloat(latest.hargabeli) !== harga) {
+          await conn.query('INSERT INTO hargabeli (idbarang, hargabeli, tgltrans) VALUES (?, ?, ?)',
+            [barang.idbarang, harga, tgltrans]);
+        }
+
+        success++;
+      } catch (e) {
+        errors.push({ row: i + 2, message: e.message });
+      }
+    }
+
+    await conn.commit();
+    res.status(201).json({ message: `Berhasil import ${success} item pembelian`, kodebeli, success, errors });
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ message: err.message });
+  } finally {
+    conn.release();
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+  }
+};
+
+exports.importJual = async (req, res) => {
+  if (!req.file) return res.status(400).json({ message: 'File tidak ditemukan' });
+  const conn = await pool.getConnection();
+  try {
+    const content = fs.readFileSync(req.file.path, 'utf-8');
+    const { rows } = parseCSV(content);
+    if (!rows.length) return res.status(400).json({ message: 'Data kosong' });
+
+    await conn.beginTransaction();
+
+    const tgltrans = rows[0].tgltrans || new Date().toISOString().slice(0, 10);
+    const idcustomer = parseInt(rows[0].idcustomer) || 1;
+
+    const dateStr = tgltrans.replace(/-/g, '');
+    const [[{ cnt }]] = await conn.query(`SELECT COUNT(*) as cnt FROM jual WHERE kodejual LIKE ?`, [`FJ-${dateStr}-%`]);
+    const num = String(cnt + 1).padStart(4, '0');
+    const kodejual = `FJ-${dateStr}-${num}`;
+
+    let grandtotal = 0;
+    for (const r of rows) {
+      const subtotal = parseFloat(r.subtotal) || (parseFloat(r.harga) || 0) * (parseInt(r.jml) || 0);
+      grandtotal += subtotal;
+    }
+
+    await conn.query(
+      'INSERT INTO jual (kodejual, tgltrans, idcustomer, idkasir, grandtotal, bayar, kembali) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [kodejual, tgltrans, idcustomer, 1, grandtotal, 0, 0]
+    );
+
+    const [[header]] = await conn.query('SELECT idjual FROM jual WHERE kodejual = ?', [kodejual]);
+
+    let success = 0;
+    const errors = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r.kodebarang) { errors.push({ row: i + 2, message: 'kodebarang wajib diisi' }); continue; }
+
+      try {
+        const [[barang]] = await conn.query('SELECT idbarang FROM barang WHERE kodebarang = ?', [r.kodebarang]);
+        if (!barang) { errors.push({ row: i + 2, message: `Barang ${r.kodebarang} tidak ditemukan` }); continue; }
+
+        const jml = parseInt(r.jml) || 0;
+        const harga = parseFloat(r.harga) || 0;
+        const ppn = parseFloat(r.ppn) || 0;
+        const diskon = parseFloat(r.diskon) || 0;
+        const subtotal = parseFloat(r.subtotal) || (harga * jml) + ppn - (harga * jml * diskon / 100);
+
+        await conn.query(
+          'INSERT INTO jualdtl (idjual, kodejual, idbarang, jml, harga, ppn, diskon, subtotal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [header.idjual, kodejual, barang.idbarang, jml, harga, ppn, diskon, subtotal]
+        );
+
+        await conn.query(
+          'INSERT INTO kartustok (kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [kodejual, barang.idbarang, jml, 'K', tgltrans, `Import penjualan ${kodejual}`, header.idjual, 'jual']
+        );
+
+        success++;
+      } catch (e) {
+        errors.push({ row: i + 2, message: e.message });
+      }
+    }
+
+    await conn.commit();
+    res.status(201).json({ message: `Berhasil import ${success} item penjualan`, kodejual, success, errors });
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ message: err.message });
+  } finally {
+    conn.release();
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+  }
+};
+
+// ==================== TEMPLATE ====================
+
+exports.templateBarang = (req, res) => {
+  sendCSV(res, 'template_barang.csv',
+    ['namabarang', 'satuanbesar', 'satuansedang', 'satuankecil', 'konversi1', 'konversi2', 'jenis', 'stokmin', 'hargabeli', 'hargajual'],
+    [{ namabarang: 'Contoh Barang', satuanbesar: 'DUS', satuansedang: 'PACK', satuankecil: 'PCS', konversi1: '10', konversi2: '50', jenis: 'BAHAN JADI', stokmin: '5', hargabeli: '10000', hargajual: '15000' }]
+  );
+};
+
+exports.templateCustomer = (req, res) => {
+  sendCSV(res, 'template_customer.csv',
+    ['namacustomer', 'alamat', 'hp'],
+    [{ namacustomer: 'Contoh Customer', alamat: 'Jl. Contoh 123', hp: '081234567890' }]
+  );
+};
+
+exports.templateSupplier = (req, res) => {
+  sendCSV(res, 'template_supplier.csv',
+    ['namasupplier', 'alamat', 'hp'],
+    [{ namasupplier: 'Contoh Supplier', alamat: 'Jl. Contoh 123', hp: '081234567890' }]
+  );
+};
+
+exports.templateBeli = (req, res) => {
+  sendCSV(res, 'template_pembelian.csv',
+    ['tgltrans', 'idsupplier', 'kodebarang', 'jml', 'harga', 'ppn', 'diskon'],
+    [{ tgltrans: '2025-01-01', idsupplier: '1', kodebarang: 'BRG-0001', jml: '10', harga: '10000', ppn: '11000', diskon: '0' }]
+  );
+};
+
+exports.templateJual = (req, res) => {
+  sendCSV(res, 'template_penjualan.csv',
+    ['tgltrans', 'idcustomer', 'kodebarang', 'jml', 'harga', 'ppn', 'diskon'],
+    [{ tgltrans: '2025-01-01', idcustomer: '1', kodebarang: 'BRG-0001', jml: '5', harga: '15000', ppn: '8250', diskon: '0' }]
+  );
+};

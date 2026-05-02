@@ -51,6 +51,18 @@ exports.create = async (req, res) => {
       );
     }
 
+    // Jurnal — KAS DEBET & PENJUALAN KREDIT
+    const [[akunKas]] = await conn.query("SELECT idakun FROM akun WHERE namaakun = 'KAS' LIMIT 1");
+    const [[akunJual]] = await conn.query("SELECT idakun FROM akun WHERE namaakun = 'PENJUALAN' LIMIT 1");
+    if (akunKas) {
+      await conn.query('INSERT INTO jurnal (idtrans, kodetrans, jenis, idakun, posisi, amount) VALUES (?, ?, ?, ?, ?, ?)',
+        [header.idjual, kodejual, 'jual', akunKas.idakun, 'DEBET', grandtotal]);
+    }
+    if (akunJual) {
+      await conn.query('INSERT INTO jurnal (idtrans, kodetrans, jenis, idakun, posisi, amount) VALUES (?, ?, ?, ?, ?, ?)',
+        [header.idjual, kodejual, 'jual', akunJual.idakun, 'KREDIT', grandtotal]);
+    }
+
     await conn.commit();
     res.status(201).json({ message: 'Transaksi berhasil', kodejual, idjual: header.idjual });
   } catch (err) {
@@ -85,7 +97,7 @@ exports.getOne = async (req, res) => {
       FROM jual j LEFT JOIN customer c ON j.idcustomer = c.idcustomer
       LEFT JOIN users u ON j.idkasir = u.iduser WHERE j.idjual = ?`, [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ message: 'Transaksi tidak ditemukan' });
-    const [items] = await pool.query(`SELECT jd.*, b.namabarang, b.satuan
+    const [items] = await pool.query(`SELECT jd.*, b.namabarang, b.satuankecil
       FROM jualdtl jd LEFT JOIN barang b ON jd.idbarang = b.idbarang WHERE jd.idjual = ?`, [req.params.id]);
     res.json({ ...rows[0], items });
   } catch (err) {
@@ -104,6 +116,9 @@ exports.cancel = async (req, res) => {
     if (jual.status === 0) return res.status(400).json({ message: 'Transaksi sudah dibatalkan' });
 
     await conn.query('UPDATE jual SET status = 0 WHERE idjual = ?', [id]);
+
+    // Nonaktifkan jurnal
+    await conn.query("UPDATE jurnal SET status = 0 WHERE kodetrans = ? AND jenis = 'jual'", [jual.kodejual]);
 
     // Reverse kartustok: add Masuk (M) entries to cancel the Keluar (K)
     const [details] = await conn.query('SELECT * FROM jualdtl WHERE idjual = ?', [id]);

@@ -23,7 +23,9 @@ async function migrate() {
     'penyesuaianstokdtl', 'penyesuaianstok',
     'belidtl', 'beli', 'jualdtl', 'jual',
     'hargajual', 'hargabeli',
-    'barang', 'supplier', 'customer', 'users'
+    'resepdtl', 'resep',
+    'kasdtl', 'kas', 'jurnal',
+    'barang', 'supplier', 'customer', 'akun', 'users'
   ];
   for (const t of tables) {
     await connection.query(`DROP TABLE IF EXISTS \`${t}\``);
@@ -74,7 +76,12 @@ async function migrate() {
       idbarang INT AUTO_INCREMENT PRIMARY KEY,
       kodebarang VARCHAR(20) NOT NULL UNIQUE,
       namabarang VARCHAR(200) NOT NULL,
-      satuan VARCHAR(20),
+      satuanbesar VARCHAR(20),
+      satuansedang VARCHAR(20),
+      satuankecil VARCHAR(20),
+      konversi1 INT DEFAULT 0,
+      konversi2 INT DEFAULT 0,
+      jenis ENUM('BAHAN BAKU', 'BAHAN JADI') DEFAULT 'BAHAN JADI',
       stokmin INT DEFAULT 0,
       status INT DEFAULT 1
     ) ENGINE=InnoDB
@@ -274,6 +281,87 @@ async function migrate() {
     ) ENGINE=InnoDB
   `);
 
+  // 19. resep
+  await connection.query(`
+    CREATE TABLE resep (
+      idresep INT AUTO_INCREMENT PRIMARY KEY,
+      koderesep VARCHAR(30) NOT NULL UNIQUE,
+      idbarang INT NOT NULL,
+      status INT DEFAULT 1,
+      FOREIGN KEY (idbarang) REFERENCES barang(idbarang)
+    ) ENGINE=InnoDB
+  `);
+
+  // 20. resepdtl
+  await connection.query(`
+    CREATE TABLE resepdtl (
+      idresepdtl INT AUTO_INCREMENT PRIMARY KEY,
+      idresep INT NOT NULL,
+      koderesep VARCHAR(30),
+      idbarang INT NOT NULL,
+      jml DECIMAL(15,2) NOT NULL,
+      satuan VARCHAR(20),
+      harga DECIMAL(15,2) DEFAULT 0,
+      subtotal DECIMAL(15,2) DEFAULT 0,
+      FOREIGN KEY (idresep) REFERENCES resep(idresep) ON DELETE CASCADE,
+      FOREIGN KEY (idbarang) REFERENCES barang(idbarang)
+    ) ENGINE=InnoDB
+  `);
+
+  // 21. akun
+  await connection.query(`
+    CREATE TABLE akun (
+      idakun INT AUTO_INCREMENT PRIMARY KEY,
+      kodeakun VARCHAR(20) NOT NULL UNIQUE,
+      namaakun VARCHAR(200) NOT NULL,
+      posisi ENUM('DEBET','KREDIT') NOT NULL DEFAULT 'DEBET',
+      iduser INT,
+      status INT DEFAULT 1,
+      FOREIGN KEY (iduser) REFERENCES users(iduser)
+    ) ENGINE=InnoDB
+  `);
+
+  // 22. kas
+  await connection.query(`
+    CREATE TABLE kas (
+      idkas INT AUTO_INCREMENT PRIMARY KEY,
+      kodekas VARCHAR(30) NOT NULL UNIQUE,
+      tgltrans DATE NOT NULL,
+      iduser INT,
+      status INT DEFAULT 1,
+      FOREIGN KEY (iduser) REFERENCES users(iduser)
+    ) ENGINE=InnoDB
+  `);
+
+  // 23. kasdtl
+  await connection.query(`
+    CREATE TABLE kasdtl (
+      idkasdtl INT AUTO_INCREMENT PRIMARY KEY,
+      idkas INT NOT NULL,
+      kodekas VARCHAR(30),
+      idakun INT NOT NULL,
+      catatan VARCHAR(200),
+      amount DECIMAL(15,2) NOT NULL,
+      FOREIGN KEY (idkas) REFERENCES kas(idkas) ON DELETE CASCADE,
+      FOREIGN KEY (idakun) REFERENCES akun(idakun)
+    ) ENGINE=InnoDB
+  `);
+
+  // 24. jurnal
+  await connection.query(`
+    CREATE TABLE jurnal (
+      idjurnal INT AUTO_INCREMENT PRIMARY KEY,
+      idtrans INT NOT NULL,
+      kodetrans VARCHAR(30) NOT NULL,
+      jenis VARCHAR(20) NOT NULL,
+      idakun INT NOT NULL,
+      posisi ENUM('DEBET','KREDIT') NOT NULL,
+      amount DECIMAL(15,2) NOT NULL,
+      status INT DEFAULT 1,
+      FOREIGN KEY (idakun) REFERENCES akun(idakun)
+    ) ENGINE=InnoDB
+  `);
+
   // Indexes
   await connection.query(`CREATE INDEX idx_kartustok_barang ON kartustok(idbarang, tgltrans)`);
   await connection.query(`CREATE INDEX idx_kartustok_tgl ON kartustok(tgltrans)`);
@@ -297,6 +385,13 @@ async function migrate() {
 
   await connection.query(`INSERT INTO supplier (kodesupplier, namasupplier, alamat, hp) VALUES (?, ?, ?, ?)`,
     ['SUP-0001', 'Supplier Umum', '-', '-']);
+
+  await connection.query(`INSERT INTO akun (kodeakun, namaakun, posisi, iduser) VALUES (?, ?, ?, ?)`,
+    ['AKN-0001', 'KAS', 'DEBET', 1]);
+  await connection.query(`INSERT INTO akun (kodeakun, namaakun, posisi, iduser) VALUES (?, ?, ?, ?)`,
+    ['AKN-0002', 'PENJUALAN', 'KREDIT', 1]);
+  await connection.query(`INSERT INTO akun (kodeakun, namaakun, posisi, iduser) VALUES (?, ?, ?, ?)`,
+    ['AKN-0003', 'HPP', 'DEBET', 1]);
 
   console.log('Seed data inserted');
   console.log('Migration completed successfully!');
