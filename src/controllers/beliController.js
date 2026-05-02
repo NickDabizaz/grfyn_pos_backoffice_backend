@@ -9,13 +9,13 @@ exports.create = async (req, res) => {
     if (!items || !items.length) return res.status(400).json({ message: 'Items tidak boleh kosong' });
 
     const [[user]] = await conn.query('SELECT ppn FROM users WHERE iduser = ?', [idkasir || 1]);
-    const ppnPercent = user ? parseFloat(user.ppn) : 11;
+    const ppnPercent = req.body.useppn === false ? 0 : (user ? parseFloat(user.ppn) : 11);
 
-    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const dateStr     = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const [[{ cnt }]] = await conn.query(`SELECT COUNT(*) as cnt FROM beli WHERE kodebeli LIKE ?`, [`PB-${dateStr}-%`]);
-    const num = String(cnt + 1).padStart(4, '0');
-    const kodebeli = `PB-${dateStr}-${num}`;
-    const tgltrans = new Date().toISOString().slice(0, 10);
+    const num         = String(cnt + 1).padStart(4, '0');
+    const kodebeli    = `PB-${dateStr}-${num}`;
+    const tgltrans    = new Date().toISOString().slice(0, 10);
 
     await conn.query(
       'INSERT INTO beli (kodebeli, tgltrans, idsupplier, idkasir, grandtotal, bayar) VALUES (?, ?, ?, ?, ?, ?)',
@@ -25,9 +25,9 @@ exports.create = async (req, res) => {
     const [[header]] = await conn.query('SELECT idbeli FROM beli WHERE kodebeli = ?', [kodebeli]);
 
     for (const item of items) {
-      const ppnAmount = (item.harga * item.jml * ppnPercent) / 100;
+      const ppnAmount    = (item.harga * item.jml * ppnPercent) / 100;
       const diskonAmount = item.diskon ? (item.harga * item.jml * item.diskon) / 100 : 0;
-      const subtotal = (item.harga * item.jml) + ppnAmount - diskonAmount;
+      const subtotal     = (item.harga * item.jml) + ppnAmount - diskonAmount;
 
       await conn.query(
         'INSERT INTO belidtl (idbeli, kodebeli, idbarang, jml, harga, ppn, diskon, subtotal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',

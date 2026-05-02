@@ -146,8 +146,8 @@ exports.getHargaJual = async (req, res) => {
 exports.checkPrice = async (req, res) => {
   try {
     const [rows] = await pool.query(`SELECT b.*,
-      (SELECT hargabeli FROM hargabeli WHERE idbarang = b.idbarang ORDER BY tgltrans DESC LIMIT 1) as hargabeli,
-      (SELECT hargajual FROM hargajual WHERE idbarang = b.idbarang ORDER BY tgltrans DESC LIMIT 1) as hargajual
+      (SELECT hargabeli FROM hargabeli WHERE idbarang = b.idbarang ORDER BY tgltrans DESC, hargabeli desc LIMIT 1) as hargabeli,
+      (SELECT hargajual FROM hargajual WHERE idbarang = b.idbarang ORDER BY tgltrans DESC, hargajual desc LIMIT 1) as hargajual
     FROM barang b WHERE b.status = 1`);
     const warnings = rows.filter(r => r.hargajual && r.hargabeli && parseFloat(r.hargajual) < parseFloat(r.hargabeli));
     res.json({ total: rows.length, warnings: warnings.length, items: warnings });

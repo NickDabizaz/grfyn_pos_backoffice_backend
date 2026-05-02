@@ -215,6 +215,51 @@ exports.createClosing = async (req, res) => {
   }
 };
 
+// ============ SALDO AWAL STOK ============
+exports.createSaldoAwal = async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const { idkasir, keterangan, items } = req.body;
+
+    if (!items || !items.length) return res.status(400).json({ message: 'Items tidak boleh kosong' });
+
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const [[{ cnt }]] = await conn.query('SELECT COUNT(*) as cnt FROM saldostok WHERE kodesaldostok LIKE ?', [`SA-${dateStr}-%`]);
+    const num = String(cnt + 1).padStart(4, '0');
+    const kodeSaldo = `SA-${dateStr}-${num}`;
+    const tgltrans = new Date().toISOString().slice(0, 10);
+
+    await conn.query(
+      'INSERT INTO saldostok (kodesaldostok, tgltrans, keterangan) VALUES (?, ?, ?)',
+      [kodeSaldo, tgltrans, keterangan || 'SALDO AWAL STOK']
+    );
+    const [[header]] = await conn.query('SELECT idsaldostok FROM saldostok WHERE kodesaldostok = ?', [kodeSaldo]);
+
+    for (const item of items) {
+      await conn.query(
+        'INSERT INTO saldostokdtl (idsaldostok, kodesaldostok, idbarang, jml) VALUES (?, ?, ?, ?)',
+        [header.idsaldostok, kodeSaldo, item.idbarang, item.jml]
+      );
+
+      if (item.jml > 0) {
+        await conn.query(
+          'INSERT INTO kartustok (kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [kodeSaldo, item.idbarang, item.jml, 'M', tgltrans, `Saldo Awal ${kodeSaldo}`, header.idsaldostok, 'saldostok']
+        );
+      }
+    }
+
+    await conn.commit();
+    res.status(201).json({ message: 'Saldo awal stok berhasil', kode: kodeSaldo });
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ message: err.message });
+  } finally {
+    conn.release();
+  }
+};
+
 exports.getClosing = async (req, res) => {
   try {
     const { jenis } = req.query;

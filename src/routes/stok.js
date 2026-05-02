@@ -13,6 +13,7 @@ router.post('/penyesuaian', auth, ctrl.createPenyesuaian);
 // Saldo stok
 router.get('/saldostok', auth, ctrl.getSaldoStok);
 router.get('/saldostok-list', auth, ctrl.getSaldoStokList);
+router.post('/saldoawal', auth, ctrl.createSaldoAwal);
 
 // Closing
 router.post('/closing', auth, ctrl.createClosing);

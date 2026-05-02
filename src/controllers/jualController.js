@@ -14,9 +14,9 @@ exports.create = async (req, res) => {
 
     if (!items || !items.length) return res.status(400).json({ message: 'Items tidak boleh kosong' });
 
-    // Get PPN from user
+    // Get PPN from user, respect useppn flag
     const [[user]] = await conn.query('SELECT ppn FROM users WHERE iduser = ?', [idkasir || 1]);
-    const ppnPercent = user ? parseFloat(user.ppn) : 11;
+    const ppnPercent = req.body.useppn === false ? 0 : (user ? parseFloat(user.ppn) : 11);
 
     // Generate kode
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
