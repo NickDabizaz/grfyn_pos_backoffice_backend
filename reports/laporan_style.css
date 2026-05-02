@@ -4,7 +4,7 @@
 body {
   font-family: 'Plus Jakarta Sans', sans-serif;
   font-size: 12px;
-  color: #1C1917;
+  color: #4B3E34;
   padding: 20px;
   background: #fff;
 }
@@ -13,7 +13,7 @@ body {
   text-align: center;
   margin-bottom: 20px;
   padding-bottom: 15px;
-  border-bottom: 2px solid #E76F51;
+  border-bottom: 2px solid #C4683D;
 }
 
 .report-header .logo {
@@ -24,20 +24,20 @@ body {
 .report-header h2 {
   font-size: 18px;
   font-weight: 700;
-  color: #264653;
+  color: #635446;
   margin-bottom: 2px;
 }
 
 .report-header .subtitle {
   font-size: 11px;
-  color: #78716C;
+  color: #998A76;
   margin-bottom: 2px;
 }
 
 .report-header h3 {
   font-size: 14px;
   font-weight: 600;
-  color: #E76F51;
+  color: #C4683D;
   margin-top: 8px;
 }
 
@@ -46,12 +46,12 @@ body {
   justify-content: space-between;
   margin-bottom: 12px;
   font-size: 11px;
-  color: #78716C;
+  color: #998A76;
 }
 
 .report-meta .periode {
   font-weight: 600;
-  color: #44403C;
+  color: #4B3E34;
 }
 
 table {
@@ -61,7 +61,7 @@ table {
 }
 
 table thead th {
-  background: #E76F51;
+  background: #C4683D;
   color: #fff;
   padding: 8px 6px;
   font-size: 10px;
@@ -81,12 +81,12 @@ table thead th.right {
 
 table tbody td {
   padding: 6px;
-  border-bottom: 1px solid #E7E5E4;
+  border-bottom: 1px solid #D7CAC1;
   font-size: 11px;
 }
 
 table tbody tr:nth-child(even) {
-  background: #FEFAE0;
+  background: #FDF8F2;
 }
 
 table tbody td.right {
@@ -101,8 +101,8 @@ table tfoot td {
   padding: 8px 6px;
   font-weight: 700;
   font-size: 12px;
-  border-top: 2px solid #E76F51;
-  background: #FFF8F0;
+  border-top: 2px solid #C4683D;
+  background: #FAEFE5;
 }
 
 table tfoot td.right {
@@ -113,7 +113,7 @@ table tfoot td.right {
   margin-top: 20px;
   text-align: right;
   font-size: 11px;
-  color: #78716C;
+  color: #998A76;
 }
 
 .report-footer .signature {
@@ -138,8 +138,8 @@ table tfoot td.right {
 }
 
 .status-badge.pending {
-  background: #FEF3C7;
-  color: #92400E;
+  background: #FAF2E0;
+  color: #A07D30;
 }
 
 @media print {
