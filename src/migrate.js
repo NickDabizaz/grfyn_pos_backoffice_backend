@@ -246,37 +246,7 @@ async function migrate() {
     ) ENGINE=InnoDB
   `);
 
-<<<<<<< HEAD
   // 16. closing
-=======
-  // 16. saldoawal
-  await connection.query(`
-    CREATE TABLE saldoawal (
-      idsaldoawal INT AUTO_INCREMENT PRIMARY KEY,
-      kodesaldoawal VARCHAR(30) NOT NULL UNIQUE,
-      tgltrans DATE NOT NULL,
-      catatan TEXT,
-      status INT DEFAULT 1
-    ) ENGINE=InnoDB
-  `);
-
-  // 17. saldoawaldtl
-  await connection.query(`
-    CREATE TABLE saldoawaldtl (
-      idsaldoawaldtl INT AUTO_INCREMENT PRIMARY KEY,
-      idsaldoawal INT NOT NULL,
-      kodesaldoawal VARCHAR(30),
-      idbarang INT,
-      jml INT NOT NULL,
-      harga DECIMAL(15,2) NOT NULL,
-      subtotal DECIMAL(15,2) NOT NULL,
-      FOREIGN KEY (idsaldoawal) REFERENCES saldoawal(idsaldoawal) ON DELETE CASCADE,
-      FOREIGN KEY (idbarang) REFERENCES barang(idbarang)
-    ) ENGINE=InnoDB
-  `);
-
-  // 18. closing
->>>>>>> 503bb98c762027b354d9e9b30ca1c01f18780e37
   await connection.query(`
     CREATE TABLE closing (
       idclosing INT AUTO_INCREMENT PRIMARY KEY,
@@ -287,31 +257,20 @@ async function migrate() {
     ) ENGINE=InnoDB
   `);
 
-<<<<<<< HEAD
   // 17. resep
-=======
-  // 19. resep
->>>>>>> 503bb98c762027b354d9e9b30ca1c01f18780e37
   await connection.query(`
     CREATE TABLE resep (
       idresep INT AUTO_INCREMENT PRIMARY KEY,
       koderesep VARCHAR(30) NOT NULL UNIQUE,
       idbarang INT NOT NULL,
-<<<<<<< HEAD
       hasiljml DECIMAL(15,2) DEFAULT 0,
       hasilsatuan VARCHAR(20),
-=======
->>>>>>> 503bb98c762027b354d9e9b30ca1c01f18780e37
       status INT DEFAULT 1,
       FOREIGN KEY (idbarang) REFERENCES barang(idbarang)
     ) ENGINE=InnoDB
   `);
 
-<<<<<<< HEAD
   // 18. resepdtl
-=======
-  // 20. resepdtl
->>>>>>> 503bb98c762027b354d9e9b30ca1c01f18780e37
   await connection.query(`
     CREATE TABLE resepdtl (
       idresepdtl INT AUTO_INCREMENT PRIMARY KEY,
@@ -327,7 +286,6 @@ async function migrate() {
     ) ENGINE=InnoDB
   `);
 
-<<<<<<< HEAD
   // 19. produksi
   await connection.query(`
     CREATE TABLE produksi (
@@ -367,8 +325,6 @@ async function migrate() {
     ) ENGINE=InnoDB
   `);
 
-=======
->>>>>>> 503bb98c762027b354d9e9b30ca1c01f18780e37
   // 21. akun
   await connection.query(`
     CREATE TABLE akun (
@@ -408,11 +364,7 @@ async function migrate() {
     ) ENGINE=InnoDB
   `);
 
-<<<<<<< HEAD
   // 22. jurnal
-=======
-  // 24. jurnal
->>>>>>> 503bb98c762027b354d9e9b30ca1c01f18780e37
   await connection.query(`
     CREATE TABLE jurnal (
       idjurnal INT AUTO_INCREMENT PRIMARY KEY,
