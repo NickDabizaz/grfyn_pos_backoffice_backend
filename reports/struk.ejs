@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>Struk <%= kodejual %></title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 12px;
+      color: #4B3E34;
+      background: #fff;
+      width: 80mm;
+      max-width: 80mm;
+      padding: 8px;
+      margin: 0 auto;
+    }
+    .center { text-align: center; }
+    .right { text-align: right; }
+    .bold { font-weight: 700; }
+    .header { text-align: center; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dashed #998A76; }
+    .header h2 { font-size: 14px; font-weight: 700; color: #635446; margin-bottom: 2px; }
+    .header p { font-size: 10px; color: #998A76; margin-bottom: 1px; }
+    .header .title { font-size: 12px; font-weight: 600; color: #C4683D; margin-top: 4px; }
+    .info { margin: 8px 0; font-size: 10px; }
+    .info-row { display: flex; justify-content: space-between; margin-bottom: 2px; }
+    .items { margin: 8px 0; border-top: 1px dashed #D7CAC1; border-bottom: 1px dashed #D7CAC1; padding: 6px 0; }
+    .item { margin-bottom: 6px; }
+    .item-name { font-size: 10px; font-weight: 600; }
+    .item-detail { font-size: 9px; color: #998A76; display: flex; justify-content: space-between; }
+    .totals { margin: 8px 0; font-size: 11px; }
+    .totals-row { display: flex; justify-content: space-between; margin-bottom: 2px; }
+    .totals-row.grand { font-size: 13px; font-weight: 700; margin-top: 4px; padding-top: 4px; border-top: 1px dashed #D7CAC1; }
+    .footer { text-align: center; margin-top: 12px; padding-top: 8px; border-top: 1px dashed #998A76; font-size: 9px; color: #998A76; }
+    .qrcode { text-align: center; margin-top: 8px; }
+    .qrcode img { max-width: 60px; }
+    @media print {
+      body { width: 80mm; padding: 4px; }
+      .no-print { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="text-align:center;margin-bottom:10px;">
+    <button onclick="window.print()" style="padding:8px 16px;background:#C4683D;color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;font-weight:600;">Cetak Struk</button>
+  </div>
+
+  <div class="header">
+    <% if (logo) { %><img src="<%= logo %>" alt="Logo" style="max-width:50px;margin-bottom:4px;"><% } %>
+    <h2><%= namatoko %></h2>
+    <p><%= alamat %></p>
+    <p><%= hp %></p>
+    <p class="title">STRUK PENJUALAN</p>
+  </div>
+
+  <div class="info">
+    <div class="info-row"><span>No Transaksi</span><span class="bold"><%= kodejual %></span></div>
+    <div class="info-row"><span>Tanggal</span><span><%= tgltrans %></span></div>
+    <div class="info-row"><span>Kasir</span><span><%= kasir || '-' %></span></div>
+    <div class="info-row"><span>Customer</span><span><%= namacustomer || 'CASH' %></span></div>
+  </div>
+
+  <div class="items">
+    <% items.forEach(function(item) { %>
+    <div class="item">
+      <div class="item-name"><%= item.namabarang %></div>
+      <div class="item-detail">
+        <span><%= Number(item.jml).toLocaleString('id-ID') %> <%= item.satuankecil %> x Rp <%= Number(item.harga).toLocaleString('id-ID') %></span>
+        <span>Rp <%= Number(item.subtotal).toLocaleString('id-ID') %></span>
+      </div>
+      <% if (item.diskon > 0) { %>
+      <div class="item-detail" style="color:#C4683D;">Diskon: <%= item.diskon %>%</div>
+      <% } %>
+    </div>
+    <% }); %>
+  </div>
+
+  <div class="totals">
+    <div class="totals-row"><span>Subtotal</span><span>Rp <%= Number(subtotal).toLocaleString('id-ID') %></span></div>
+    <% if (ppn > 0) { %>
+    <div class="totals-row"><span>PPN</span><span>Rp <%= Number(ppn).toLocaleString('id-ID') %></span></div>
+    <% } %>
+    <% if (totalDiskon > 0) { %>
+    <div class="totals-row"><span>Diskon</span><span>- Rp <%= Number(totalDiskon).toLocaleString('id-ID') %></span></div>
+    <% } %>
+    <div class="totals-row grand"><span>TOTAL</span><span>Rp <%= Number(grandtotal).toLocaleString('id-ID') %></span></div>
+    <div class="totals-row"><span>Bayar</span><span>Rp <%= Number(bayar).toLocaleString('id-ID') %></span></div>
+    <div class="totals-row"><span>Kembali</span><span>Rp <%= Number(kembali).toLocaleString('id-ID') %></span></div>
+  </div>
+
+  <div class="footer">
+    <p>Terima kasih atas kunjungan Anda</p>
+    <p>&copy; <%= namatoko %> - Grfyn POS</p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>Faktur Penjualan <%= kodejual %></title>
+  <link rel="stylesheet" href="/reports/laporan_style.css">
+  <style>
+    @media print { .no-print { display: none; } }
+    .invoice-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 2px solid #C4683D; }
+    .invoice-header .brand { text-align: left; }
+    .invoice-header .brand h2 { font-size: 18px; font-weight: 700; color: #635446; margin-bottom: 2px; }
+    .invoice-header .brand p { font-size: 11px; color: #998A76; margin-bottom: 1px; }
+    .invoice-header .doc-info { text-align: right; }
+    .invoice-header .doc-info h3 { font-size: 16px; font-weight: 700; color: #C4683D; margin-bottom: 4px; }
+    .invoice-header .doc-info p { font-size: 11px; color: #4B3E34; margin-bottom: 2px; }
+    .invoice-meta { display: flex; justify-content: space-between; margin-bottom: 20px; }
+    .invoice-box { background: #FAEFE5; border-radius: 8px; padding: 10px 12px; min-width: 220px; }
+    .invoice-box h4 { font-size: 10px; font-weight: 700; color: #998A76; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+    .invoice-box p { font-size: 11px; color: #4B3E34; margin-bottom: 2px; }
+    .invoice-box .bold { font-weight: 700; color: #635446; }
+    .items-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+    .items-table thead th { background: #C4683D; color: #fff; padding: 8px 6px; font-size: 10px; font-weight: 600; text-align: left; text-transform: uppercase; letter-spacing: 0.5px; }
+    .items-table thead th.center { text-align: center; }
+    .items-table thead th.right { text-align: right; }
+    .items-table tbody td { padding: 6px; border-bottom: 1px solid #D7CAC1; font-size: 11px; }
+    .items-table tbody td.center { text-align: center; }
+    .items-table tbody td.right { text-align: right; }
+    .items-table tfoot td { padding: 8px 6px; font-weight: 700; font-size: 12px; border-top: 2px solid #C4683D; background: #FAEFE5; }
+    .items-table tfoot td.right { text-align: right; }
+    .summary-section { display: flex; justify-content: flex-end; margin-top: 10px; }
+    .summary-box { width: 320px; }
+    .summary-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 11px; color: #4B3E34; }
+    .summary-row.grand { font-size: 14px; font-weight: 700; color: #C4683D; border-top: 2px solid #C4683D; margin-top: 4px; padding-top: 8px; }
+    .signature-section { display: flex; justify-content: space-between; margin-top: 40px; }
+    .signature-box { text-align: center; width: 150px; }
+    .signature-box p { font-size: 11px; color: #4B3E34; margin-bottom: 40px; }
+    .signature-box .name { font-weight: 700; border-top: 1px solid #D7CAC1; padding-top: 4px; }
+    .stamp-box { text-align: center; width: 120px; }
+    .stamp-box .stamp { width: 100px; height: 100px; border: 2px dashed #C4683D; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto; color: #C4683D; font-size: 10px; font-weight: 700; transform: rotate(-12deg); opacity: 0.6; }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="text-align:right;margin-bottom:10px;">
+    <button onclick="window.print()" style="padding:8px 16px;background:#C4683D;color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;font-weight:600;">Cetak Faktur</button>
+  </div>
+
+  <div class="invoice-header">
+    <div class="brand">
+      <% if (logo) { %><img src="<%= logo %>" alt="Logo" style="max-width:60px;margin-bottom:6px;"><% } %>
+      <h2><%= namatoko %></h2>
+      <p><%= alamat %></p>
+      <p><%= hp %></p>
+    </div>
+    <div class="doc-info">
+      <h3>FAKTUR PENJUALAN</h3>
+      <p><span class="bold">No. <%= kodejual %></span></p>
+      <p>Tanggal: <%= tgltrans %></p>
+      <p>Status: <span style="color:#166534;font-weight:600;"><%= status === 0 ? 'BATAL' : 'LUNAS' %></span></p>
+    </div>
+  </div>
+
+  <div class="invoice-meta">
+    <div class="invoice-box">
+      <h4>Ditagihkan Kepada</h4>
+      <p class="bold"><%= namacustomer || 'CASH' %></p>
+      <p><%= customerKode || '-' %></p>
+      <p><%= customerAlamat || '-' %></p>
+      <p><%= customerHp || '-' %></p>
+    </div>
+    <div class="invoice-box">
+      <h4>Informasi Transaksi</h4>
+      <p>Kasir: <span class="bold"><%= kasir || '-' %></span></p>
+      <p>Tgl Cetak: <%= tglcetak %></p>
+    </div>
+  </div>
+
+  <table class="items-table">
+    <thead>
+      <tr>
+        <th class="center" style="width:30px;">No</th>
+        <th>Nama Barang</th>
+        <th class="center" style="width:50px;">Qty</th>
+        <th class="center" style="width:60px;">Satuan</th>
+        <th class="right" style="width:90px;">Harga</th>
+        <th class="right" style="width:60px;">Diskon</th>
+        <th class="right" style="width:100px;">Subtotal</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% items.forEach(function(item, i) { %>
+      <tr>
+        <td class="center"><%= i + 1 %></td>
+        <td><%= item.namabarang %></td>
+        <td class="center"><%= Number(item.jml).toLocaleString('id-ID') %></td>
+        <td class="center"><%= item.satuankecil %></td>
+        <td class="right">Rp <%= Number(item.harga).toLocaleString('id-ID') %></td>
+        <td class="right"><%= item.diskon ? item.diskon + '%' : '-' %></td>
+        <td class="right">Rp <%= Number(item.subtotal).toLocaleString('id-ID') %></td>
+      </tr>
+      <% }); %>
+    </tbody>
+  </table>
+
+  <div class="summary-section">
+    <div class="summary-box">
+      <div class="summary-row"><span>Subtotal</span><span>Rp <%= Number(subtotal).toLocaleString('id-ID') %></span></div>
+      <% if (ppn > 0) { %>
+      <div class="summary-row"><span>PPN</span><span>Rp <%= Number(ppn).toLocaleString('id-ID') %></span></div>
+      <% } %>
+      <% if (totalDiskon > 0) { %>
+      <div class="summary-row"><span>Total Diskon</span><span>- Rp <%= Number(totalDiskon).toLocaleString('id-ID') %></span></div>
+      <% } %>
+      <div class="summary-row grand"><span>Grand Total</span><span>Rp <%= Number(grandtotal).toLocaleString('id-ID') %></span></div>
+      <div class="summary-row"><span>Bayar</span><span>Rp <%= Number(bayar).toLocaleString('id-ID') %></span></div>
+      <div class="summary-row"><span>Kembali</span><span>Rp <%= Number(kembali).toLocaleString('id-ID') %></span></div>
+    </div>
+  </div>
+
+  <div class="signature-section">
+    <div class="signature-box">
+      <p>Penerima,</p>
+      <p class="name">(_________________)</p>
+    </div>
+    <div class="stamp-box">
+      <div class="stamp">LUNAS</div>
+    </div>
+    <div class="signature-box">
+      <p>Hormat Kami,</p>
+      <p class="name"><%= kasir || '(_________________)' %></p>
+    </div>
+  </div>
+
+  <div class="report-footer" style="margin-top:30px;text-align:center;">
+    <p>&copy; <%= namatoko %> - Generated by Grfyn POS</p>
+  </div>
+</body>
+</html>
