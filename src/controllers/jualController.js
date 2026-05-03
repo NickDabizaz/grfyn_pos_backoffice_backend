@@ -75,7 +75,11 @@ exports.create = async (req, res) => {
 
 exports.getAll = async (req, res) => {
   try {
+<<<<<<< HEAD
     const { tglwal, tglakhir, idcustomer, jenis } = req.query;
+=======
+    const { tglwal, tglakhir, idcustomer } = req.query;
+>>>>>>> 503bb98c762027b354d9e9b30ca1c01f18780e37
     let sql = `SELECT j.*, c.namacustomer, u.username as kasir
       FROM jual j LEFT JOIN customer c ON j.idcustomer = c.idcustomer
       LEFT JOIN users u ON j.idkasir = u.iduser WHERE 1=1`;
@@ -83,7 +87,10 @@ exports.getAll = async (req, res) => {
     if (tglwal) { sql += ' AND j.tgltrans >= ?'; params.push(tglwal); }
     if (tglakhir) { sql += ' AND j.tgltrans <= ?'; params.push(tglakhir); }
     if (idcustomer) { sql += ' AND j.idcustomer = ?'; params.push(idcustomer); }
+<<<<<<< HEAD
     if (jenis) { sql += ' AND j.jenis = ?'; params.push(jenis); }
+=======
+>>>>>>> 503bb98c762027b354d9e9b30ca1c01f18780e37
     sql += ' ORDER BY j.tgltrans DESC, j.idjual DESC LIMIT 200';
     const [rows] = await pool.query(sql, params);
     res.json(rows);

@@ -31,7 +31,11 @@ exports.getPenyesuaian = async (req, res) => {
 
 exports.getPenyesuaianDetail = async (req, res) => {
   try {
+<<<<<<< HEAD
     const [rows] = await pool.query(`SELECT psd.*, b.namabarang, b.satuankecil
+=======
+    const [rows] = await pool.query(`SELECT psd.*, b.namabarang, b.satuan
+>>>>>>> 503bb98c762027b354d9e9b30ca1c01f18780e37
       FROM penyesuaianstokdtl psd LEFT JOIN barang b ON psd.idbarang = b.idbarang
       WHERE psd.idpenyesuaianstok = ?`, [req.params.id]);
     res.json(rows);
@@ -123,6 +127,7 @@ exports.createPenyesuaian = async (req, res) => {
 exports.getSaldoStok = async (req, res) => {
   try {
     const { tgl } = req.query;
+<<<<<<< HEAD
     const targetDate = tgl || new Date().toISOString().slice(0, 10);
 
     // Cek apakah ada saldostok
@@ -159,6 +164,38 @@ exports.getSaldoStok = async (req, res) => {
     ) k ON k.idbarang = b.idbarang
     WHERE b.status = 1 ORDER BY b.namabarang`;
     const [rows] = await pool.query(sql, [targetDate, targetDate]);
+=======
+    let sql, params = [];
+
+    if (tgl) {
+      // Stock at specific date = latest saldostok <= tgl + kartustok from that date to now
+      sql = `SELECT b.idbarang, b.kodebarang, b.namabarang, b.satuan, b.stokmin,
+        COALESCE(sd.jml, 0) + COALESCE(k.masuk, 0) - COALESCE(k.keluar, 0) as stok
+        FROM barang b
+        LEFT JOIN (
+          SELECT ssd.idbarang, ssd.jml FROM saldostokdtl ssd
+          JOIN saldostok ss ON ss.idsaldostok = ssd.idsaldostok
+          WHERE ss.tgltrans = (SELECT MAX(tgltrans) FROM saldostok WHERE tgltrans <= ?)
+        ) sd ON sd.idbarang = b.idbarang
+        LEFT JOIN (
+          SELECT idbarang,
+            COALESCE(SUM(CASE WHEN jenis = 'M' THEN jml ELSE 0 END), 0) as masuk,
+            COALESCE(SUM(CASE WHEN jenis = 'K' THEN jml ELSE 0 END), 0) as keluar
+          FROM kartustok WHERE tgltrans > ? GROUP BY idbarang
+        ) k ON k.idbarang = b.idbarang
+        WHERE b.status = 1 ORDER BY b.namabarang`;
+      params = [tgl, tgl];
+    } else {
+      // Current stock from kartustok only
+      sql = `SELECT b.idbarang, b.kodebarang, b.namabarang, b.satuan, b.stokmin,
+        COALESCE(m.total, 0) - COALESCE(k.total, 0) as stok
+        FROM barang b
+        LEFT JOIN (SELECT idbarang, SUM(jml) as total FROM kartustok WHERE jenis = 'M' GROUP BY idbarang) m ON b.idbarang = m.idbarang
+        LEFT JOIN (SELECT idbarang, SUM(jml) as total FROM kartustok WHERE jenis = 'K' GROUP BY idbarang) k ON b.idbarang = k.idbarang
+        WHERE b.status = 1 ORDER BY b.namabarang`;
+    }
+    const [rows] = await pool.query(sql, params);
+>>>>>>> 503bb98c762027b354d9e9b30ca1c01f18780e37
     res.json(rows);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -174,6 +211,7 @@ exports.getSaldoStokList = async (req, res) => {
   }
 };
 
+<<<<<<< HEAD
 exports.getSaldoStokDetail = async (req, res) => {
   try {
     const [rows] = await pool.query(
@@ -189,6 +227,8 @@ exports.getSaldoStokDetail = async (req, res) => {
   }
 };
 
+=======
+>>>>>>> 503bb98c762027b354d9e9b30ca1c01f18780e37
 // ============ CLOSING ============
 exports.createClosing = async (req, res) => {
   const conn = await pool.getConnection();
@@ -294,6 +334,7 @@ exports.getClosing = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+<<<<<<< HEAD
 
 // ============ GET STOK PER BARANG ============
 exports.getStok = async (req, res) => {
@@ -348,3 +389,5 @@ exports.getStok = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+=======
+>>>>>>> 503bb98c762027b354d9e9b30ca1c01f18780e37

@@ -55,8 +55,8 @@ exports.create = async (req, res) => {
     const koderesep = `RSP-${String(num).padStart(4, '0')}`;
 
     const [result] = await conn.query(
-      'INSERT INTO resep (koderesep, idbarang, hasiljml, hasilsatuan) VALUES (?, ?, ?, ?)',
-      [koderesep, idbarang, req.body.hasil_jml || 0, req.body.hasil_satuan || '']
+      'INSERT INTO resep (koderesep, idbarang) VALUES (?, ?)',
+      [koderesep, idbarang]
     );
     const idresep = result.insertId;
 
@@ -82,15 +82,15 @@ exports.update = async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    const { idbarang, details, status, hasil_jml, hasil_satuan } = req.body;
+    const { idbarang, details, status } = req.body;
     const { id } = req.params;
 
     const [resep] = await conn.query('SELECT * FROM resep WHERE idresep = ?', [id]);
     if (resep.length === 0) return res.status(404).json({ message: 'Resep tidak ditemukan' });
 
     await conn.query(
-      'UPDATE resep SET idbarang = ?, status = ?, hasiljml = ?, hasilsatuan = ? WHERE idresep = ?',
-      [idbarang || resep[0].idbarang, status ?? resep[0].status, hasil_jml ?? resep[0].hasiljml, hasil_satuan ?? resep[0].hasilsatuan, id]
+      'UPDATE resep SET idbarang = ?, status = ? WHERE idresep = ?',
+      [idbarang || resep[0].idbarang, status ?? resep[0].status, id]
     );
 
     if (details && details.length > 0) {
@@ -119,29 +119,6 @@ exports.remove = async (req, res) => {
   try {
     await pool.query('DELETE FROM resep WHERE idresep = ?', [req.params.id]);
     res.json({ message: 'Resep berhasil dihapus' });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-};
-
-exports.getByBarang = async (req, res) => {
-  try {
-    const [rows] = await pool.query(
-      `SELECT r.*, b.namabarang, b.kodebarang, b.jenis
-       FROM resep r
-       JOIN barang b ON r.idbarang = b.idbarang
-       WHERE r.idbarang = ? AND r.status = 1
-       ORDER BY r.idresep DESC LIMIT 1`, [req.params.idbarang]);
-    if (rows.length === 0) return res.json(null);
-
-    const [details] = await pool.query(
-      `SELECT d.*, b.namabarang, b.kodebarang, b.satuankecil, b.satuanbesar, b.satuansedang
-       FROM resepdtl d
-       JOIN barang b ON d.idbarang = b.idbarang
-       WHERE d.idresep = ?
-       ORDER BY d.idresepdtl`, [rows[0].idresep]);
-
-    res.json({ ...rows[0], details });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
