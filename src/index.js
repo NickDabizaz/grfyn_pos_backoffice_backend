@@ -18,6 +18,7 @@ const produksiRoutes = require('./routes/produksi');
 const akunRoutes = require('./routes/akun');
 const kasRoutes = require('./routes/kas');
 const imporRoutes = require('./routes/impor');
+const hppRoutes = require('./routes/hpp');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -47,11 +48,21 @@ app.use('/api/produksi', produksiRoutes);
 app.use('/api/akun', akunRoutes);
 app.use('/api/kas', kasRoutes);
 app.use('/api/impor', imporRoutes);
+app.use('/api/hpp', hppRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date() });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Grfyn POS Backend running on port ${PORT}`);
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use. Kill the existing process or set a different PORT in .env`);
+  } else {
+    console.error('Server error:', err.message);
+  }
+  process.exit(1);
 });
