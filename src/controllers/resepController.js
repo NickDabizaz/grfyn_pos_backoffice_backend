@@ -115,6 +115,34 @@ exports.update = async (req, res) => {
   }
 };
 
+exports.getByBarang = async (req, res) => {
+  try {
+    const { idbarang } = req.params;
+    const [rows] = await pool.query(
+      `SELECT r.*, b.namabarang, b.kodebarang
+       FROM resep r
+       JOIN barang b ON r.idbarang = b.idbarang
+       WHERE r.idbarang = ?
+       ORDER BY r.idresep DESC`,
+      [idbarang]
+    );
+    if (rows.length === 0) return res.status(404).json({ message: 'Resep tidak ditemukan' });
+
+    const [details] = await pool.query(
+      `SELECT d.*, b.namabarang, b.kodebarang, b.satuankecil
+       FROM resepdtl d
+       JOIN barang b ON d.idbarang = b.idbarang
+       WHERE d.idresep = ?
+       ORDER BY d.idresepdtl`,
+      [rows[0].idresep]
+    );
+
+    res.json({ ...rows[0], details });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
 exports.remove = async (req, res) => {
   try {
     await pool.query('DELETE FROM resep WHERE idresep = ?', [req.params.id]);

@@ -389,6 +389,16 @@ exports.importJual = async (req, res) => {
           [kodejual, barang.idbarang, jml, 'K', tgltrans, `Import penjualan ${kodejual}`, header.idjual, 'jual']
         );
 
+        // Update hargajual jika harga berbeda
+        const [[latestJual]] = await conn.query(
+          'SELECT hargajual FROM hargajual WHERE idbarang = ? ORDER BY tgltrans DESC, idhargajual DESC LIMIT 1',
+          [barang.idbarang]
+        );
+        if (!latestJual || parseFloat(latestJual.hargajual) !== harga) {
+          await conn.query('INSERT INTO hargajual (idbarang, hargajual, tgltrans) VALUES (?, ?, ?)',
+            [barang.idbarang, harga, tgltrans]);
+        }
+
         success++;
       } catch (e) {
         errors.push({ row: i + 2, message: e.message });

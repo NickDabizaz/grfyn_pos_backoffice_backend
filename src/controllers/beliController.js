@@ -4,7 +4,7 @@ exports.create = async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    const { idsupplier, idkasir, grandtotal, bayar, items } = req.body;
+    const { idsupplier, idkasir, bayar, items } = req.body;
 
     if (!items || !items.length) return res.status(400).json({ message: 'Items tidak boleh kosong' });
 
@@ -17,21 +17,34 @@ exports.create = async (req, res) => {
     const kodebeli    = `PB-${dateStr}-${num}`;
     const tgltrans    = new Date().toISOString().slice(0, 10);
 
+    // Insert header (grandtotal sementara 0, akan diupdate setelah hitung)
     await conn.query(
       'INSERT INTO beli (kodebeli, tgltrans, idsupplier, idkasir, grandtotal, bayar) VALUES (?, ?, ?, ?, ?, ?)',
-      [kodebeli, tgltrans, idsupplier || 1, idkasir, grandtotal, bayar || 0]
+      [kodebeli, tgltrans, idsupplier || 1, idkasir, 0, bayar || 0]
     );
 
     const [[header]] = await conn.query('SELECT idbeli FROM beli WHERE kodebeli = ?', [kodebeli]);
 
+    let calculatedGrandTotal = 0;
+
     for (const item of items) {
-      const ppnAmount    = (item.harga * item.jml * ppnPercent) / 100;
-      const diskonAmount = item.diskon ? (item.harga * item.jml * item.diskon) / 100 : 0;
-      const subtotal     = (item.harga * item.jml) + ppnAmount - diskonAmount;
+      // Cek harga beli terbaru dari tabel hargabeli
+      const [[latestBeli]] = await conn.query(
+        'SELECT hargabeli FROM hargabeli WHERE idbarang = ? ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1',
+        [item.idbarang]
+      );
+
+      // Gunakan harga terbaru dari DB, fallback ke harga dari frontend
+      const harga = latestBeli ? parseFloat(latestBeli.hargabeli) : parseFloat(item.harga);
+
+      const ppnAmount    = (harga * item.jml * ppnPercent) / 100;
+      const diskonAmount = item.diskon ? (harga * item.jml * item.diskon) / 100 : 0;
+      const subtotal     = (harga * item.jml) + ppnAmount - diskonAmount;
+      calculatedGrandTotal += subtotal;
 
       await conn.query(
         'INSERT INTO belidtl (idbeli, kodebeli, idbarang, jml, harga, ppn, diskon, subtotal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [header.idbeli, kodebeli, item.idbarang, item.jml, item.harga, ppnAmount, item.diskon || 0, subtotal]
+        [header.idbeli, kodebeli, item.idbarang, item.jml, harga, ppnAmount, item.diskon || 0, subtotal]
       );
 
       // Kartu Stok - M (Masuk)
@@ -40,19 +53,18 @@ exports.create = async (req, res) => {
         [kodebeli, item.idbarang, item.jml, 'M', tgltrans, `Pembelian ${kodebeli}`, header.idbeli, 'beli']
       );
 
-      // Update hargabeli jika berbeda
-      const [[latest]] = await conn.query(
-        'SELECT hargabeli FROM hargabeli WHERE idbarang = ? ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1',
-        [item.idbarang]
-      );
-      if (!latest || parseFloat(latest.hargabeli) !== parseFloat(item.harga)) {
+      // Update hargabeli jika harga dari frontend berbeda dengan harga terbaru di DB
+      if (!latestBeli || parseFloat(latestBeli.hargabeli) !== parseFloat(item.harga)) {
         await conn.query('INSERT INTO hargabeli (idbarang, hargabeli, tgltrans) VALUES (?, ?, ?)',
-          [item.idbarang, item.harga, tgltrans]);
+          [item.idbarang, parseFloat(item.harga), tgltrans]);
       }
     }
 
+    // Update header dengan grandtotal yang sudah dihitung ulang
+    await conn.query('UPDATE beli SET grandtotal = ? WHERE idbeli = ?', [calculatedGrandTotal, header.idbeli]);
+
     await conn.commit();
-    res.status(201).json({ message: 'Pembelian berhasil', kodebeli, idbeli: header.idbeli });
+    res.status(201).json({ message: 'Pembelian berhasil', kodebeli, idbeli: header.idbeli, grandtotal: calculatedGrandTotal });
   } catch (err) {
     await conn.rollback();
     res.status(500).json({ message: err.message });
@@ -63,7 +75,7 @@ exports.create = async (req, res) => {
 
 exports.getAll = async (req, res) => {
   try {
-    const { tglwal, tglakhir, idsupplier } = req.query;
+    const { tglwal, tglakhir, idsupplier, search } = req.query;
     let sql = `SELECT b.*, s.namasupplier, u.username as kasir
       FROM beli b LEFT JOIN supplier s ON b.idsupplier = s.idsupplier
       LEFT JOIN users u ON b.idkasir = u.iduser WHERE 1=1`;
@@ -71,6 +83,7 @@ exports.getAll = async (req, res) => {
     if (tglwal) { sql += ' AND b.tgltrans >= ?'; params.push(tglwal); }
     if (tglakhir) { sql += ' AND b.tgltrans <= ?'; params.push(tglakhir); }
     if (idsupplier) { sql += ' AND b.idsupplier = ?'; params.push(idsupplier); }
+    if (search) { sql += ' AND b.kodebeli LIKE ?'; params.push(`%${search}%`); }
     sql += ' ORDER BY b.tgltrans DESC, b.idbeli DESC LIMIT 200';
     const [rows] = await pool.query(sql, params);
     res.json(rows);

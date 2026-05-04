@@ -2,7 +2,12 @@ const pool = require('../config/db');
 
 exports.getAll = async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM customer ORDER BY idcustomer ASC');
+    const { search } = req.query;
+    let sql = 'SELECT * FROM customer WHERE 1=1';
+    const params = [];
+    if (search) { sql += ' AND (namacustomer LIKE ? OR kodecustomer LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
+    sql += ' ORDER BY idcustomer ASC';
+    const [rows] = await pool.query(sql, params);
     res.json(rows);
   } catch (err) {
     res.status(500).json({ message: err.message });
