@@ -1,4 +1,5 @@
 const { tenantQuery, getTenantContext } = require('../config/db');
+const logger = require('../lib/logger');
 
 exports.summary = async (req, res) => {
   try {
@@ -50,6 +51,7 @@ exports.summary = async (req, res) => {
       low_stock: lowStock
     });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -69,6 +71,7 @@ exports.lowStock = async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -85,6 +88,7 @@ exports.chart = async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };

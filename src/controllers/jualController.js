@@ -1,5 +1,6 @@
 const { tenantQuery, tenantExecute, getConnection, getTenantContext } = require('../config/db');
 const { generateKodeJual } = require('../lib/kodetrans');
+const logger = require('../lib/logger');
 
 exports.create = async (req, res) => {
   const conn = await getConnection();
@@ -74,9 +75,11 @@ exports.create = async (req, res) => {
     }
 
     await conn.commit();
+    await logger.history('JUAL_CREATE', { idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser, ref: kodejual, detail: { grandtotal: calculatedGrandTotal }, req });
     res.status(201).json({ message: 'Transaksi berhasil', kodejual, idjual: header.idjual, grandtotal: calculatedGrandTotal });
   } catch (err) {
     await conn.rollback();
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();
@@ -102,6 +105,7 @@ exports.getAll = async (req, res) => {
     const rows = await tenantQuery(sql, params);
     res.json(rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -121,6 +125,7 @@ exports.getOne = async (req, res) => {
       WHERE jd.idjual = ?`, [req.params.id]);
     res.json({ ...rows[0], items });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -150,9 +155,11 @@ exports.cancel = async (req, res) => {
     }
 
     await conn.commit();
+    await logger.history('JUAL_CANCEL', { idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser, ref: jual.kodejual, req });
     res.json({ message: 'Transaksi berhasil dibatalkan' });
   } catch (err) {
     await conn.rollback();
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();

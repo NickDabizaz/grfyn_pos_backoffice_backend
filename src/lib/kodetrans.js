@@ -106,6 +106,35 @@ async function generateKodeMaster(conn, prefix, idtenant, table, column, pad = 4
   return `${prefix}-${String(num).padStart(pad, '0')}`;
 }
 
+async function generateKodeHitungHPP(conn, idtenant, idlokasi, periodbulan) {
+  const [yyyy, mm] = periodbulan.split('-');
+  const dateStr = `${yyyy}${mm}`;
+
+  const [[lokasi]] = await conn.query(
+    'SELECT kodelokasi FROM lokasi WHERE idtenant = ? AND idlokasi = ?',
+    [idtenant, idlokasi]
+  );
+  const kdlok = lokasi.kodelokasi;
+  const pattern = `HPP.${kdlok}.${dateStr}.%`;
+
+  await conn.query('LOCK TABLES hitunghpp WRITE');
+  try {
+    const [[{ maxKode }]] = await conn.query(
+      `SELECT MAX(kodehitunghpp) as maxKode FROM hitunghpp
+       WHERE idtenant = ? AND idlokasi = ? AND kodehitunghpp LIKE ?`,
+      [idtenant, idlokasi, pattern]
+    );
+    let num = 1;
+    if (maxKode) {
+      const parts = maxKode.split('.');
+      num = parseInt(parts[parts.length - 1]) + 1;
+    }
+    return `HPP.${kdlok}.${dateStr}.${String(num).padStart(3, '0')}`;
+  } finally {
+    await conn.query('UNLOCK TABLES');
+  }
+}
+
 module.exports = {
   generateKode,
   generateKodeJual,
@@ -115,4 +144,5 @@ module.exports = {
   generateKodeSaldoStok,
   generateKodeClosing,
   generateKodeMaster,
+  generateKodeHitungHPP,
 };

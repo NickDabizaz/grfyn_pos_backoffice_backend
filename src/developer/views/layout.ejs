@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= typeof title !== 'undefined' ? title + ' - ' : '' %>Developer Portal | Grfyn POS</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            grfyn: { 50: '#fef9f5', 100: '#fdefe7', 200: '#fad6c0', 300: '#f5b590', 400: '#ed8a5c', 500: '#c4683d', 600: '#a35230', 700: '#87412a', 800: '#6e3726', 900: '#5a3022' }
+          }
+        }
+      }
+    }
+  </script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <style>
+    body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+    .sidebar { width: 250px; }
+    .main-content { margin-left: 250px; }
+    @media (max-width: 768px) { .sidebar { width: 200px; } .main-content { margin-left: 200px; } }
+    @media (max-width: 640px) { .sidebar { display: none; } .main-content { margin-left: 0; } }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen">
+  <div class="flex min-h-screen">
+    <aside class="sidebar fixed left-0 top-0 h-full bg-gray-900 border-r border-gray-800 overflow-y-auto z-10">
+      <div class="p-5 border-b border-gray-800">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 rounded-lg bg-grfyn-500 flex items-center justify-center">
+            <i data-lucide="terminal" class="w-4 h-4 text-white"></i>
+          </div>
+          <div>
+            <div class="text-sm font-semibold text-white">Dev Portal</div>
+            <div class="text-xs text-gray-500">Grfyn POS</div>
+          </div>
+        </div>
+      </div>
+      <nav class="p-3 space-y-1">
+        <% const menuItems = [
+          { id: 'dashboard', icon: 'layout-dashboard', label: 'Dashboard', href: '/developer' },
+          { id: 'logs-error', icon: 'file-text', label: 'Log Error', href: '/developer/logs/error' },
+          { id: 'logs-history', icon: 'history', label: 'Log History', href: '/developer/logs/history' },
+          { id: 'database', icon: 'database', label: 'Database', href: '/developer/database' },
+          { id: 'system', icon: 'cpu', label: 'System', href: '/developer/system' },
+          { id: 'tenants', icon: 'building-2', label: 'Tenants', href: '/developer/tenants' },
+          { id: 'db-console', icon: 'code-2', label: 'DB Console', href: '/developer/db-console' },
+          { id: 'maintenance', icon: 'wrench', label: 'Maintenance', href: '/developer/maintenance' }
+        ]; %>
+        <% menuItems.forEach(item => { %>
+          <a href="<%= item.href %>" class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors <%= active === item.id ? 'bg-grfyn-500/20 text-grfyn-400 font-medium' : 'text-gray-400 hover:text-white hover:bg-gray-800' %>">
+            <i data-lucide="<%= item.icon %>" class="w-4 h-4"></i>
+            <span><%= item.label %></span>
+          </a>
+        <% }); %>
+      </nav>
+      <div class="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-800">
+        <a href="/developer/logout" class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-gray-400 hover:text-red-400 hover:bg-gray-800 transition-colors">
+          <i data-lucide="log-out" class="w-4 h-4"></i>
+          <span>Logout</span>
+        </a>
+      </div>
+    </aside>
+    <main class="main-content flex-1 p-6">
+      <%- include(view) %>
+    </main>
+  </div>
+  <script>
+    if (typeof lucide !== 'undefined') {
+      lucide.createIcons();
+    }
+  </script>
+</body>
+</html>

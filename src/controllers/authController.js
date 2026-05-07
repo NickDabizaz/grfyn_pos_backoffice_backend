@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { pool, getConnection, tenantQuery, tenantExecute, getTenantContext } = require('../config/db');
 require('dotenv').config();
+const logger = require('../lib/logger');
 
 exports.login = async (req, res) => {
   try {
@@ -42,6 +43,7 @@ exports.login = async (req, res) => {
         { expiresIn: '2h' }
       );
 
+      await logger.history('LOGIN', { idtenant: user.idtenant, iduser: user.iduser, ref: username, req });
       return res.json({
         token,
         user: {
@@ -85,6 +87,7 @@ exports.login = async (req, res) => {
       })),
     });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -147,6 +150,7 @@ exports.selectLocation = async (req, res) => {
       },
     });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -212,6 +216,7 @@ exports.register = async (req, res) => {
       { expiresIn: '2h' }
     );
 
+    await logger.history('REGISTER', { idtenant, iduser, ref: u.username, req });
     res.status(201).json({
       message: 'Pendaftaran berhasil',
       token,
@@ -235,6 +240,7 @@ exports.register = async (req, res) => {
     if (err.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ message: 'Username atau kodelokasi sudah digunakan' });
     }
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();
@@ -257,6 +263,7 @@ exports.me = async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ message: 'User tidak ditemukan' });
     res.json(rows[0]);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -281,6 +288,7 @@ exports.changePassword = async (req, res) => {
 
     res.json({ message: 'Password berhasil diubah. Silakan login ulang.' });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };

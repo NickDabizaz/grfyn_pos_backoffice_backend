@@ -1,5 +1,6 @@
 const { tenantQuery, tenantExecute, getConnection, getTenantContext } = require('../config/db');
 const { generateKodePenyesuaian, generateKodeSaldoStok } = require('../lib/kodetrans');
+const logger = require('../lib/logger');
 
 exports.getKartuStok = async (req, res) => {
   try {
@@ -33,6 +34,7 @@ exports.getPenyesuaian = async (req, res) => {
     const rows = await tenantQuery(sql, params);
     res.json(rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -44,6 +46,7 @@ exports.getPenyesuaianDetail = async (req, res) => {
       WHERE psd.idpenyesuaianstok = ?`, [req.params.id]);
     res.json(rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -91,9 +94,11 @@ exports.createPenyesuaian = async (req, res) => {
     }
 
     await conn.commit();
+    await logger.history('STOK_PENYESUAIAN', { idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser, ref: kode, req });
     res.status(201).json({ message: 'Penyesuaian stok berhasil', kode });
   } catch (err) {
     await conn.rollback();
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();
@@ -146,6 +151,7 @@ exports.getSaldoStok = async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -156,6 +162,7 @@ exports.getSaldoStokList = async (req, res) => {
     const rows = await tenantQuery('SELECT * FROM saldostok WHERE idlokasi = ? ORDER BY tgltrans DESC, idsaldostok DESC LIMIT 50', [ctx.idlokasi]);
     res.json(rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -171,6 +178,7 @@ exports.getSaldoStokDetail = async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -227,9 +235,11 @@ exports.createSaldoAwal = async (req, res) => {
     }
 
     await conn.commit();
+    await logger.history('STOK_SALDOAWAL', { idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser, ref: kodeSaldo, req });
     res.status(201).json({ message: 'Saldo awal stok berhasil', kode: kodeSaldo });
   } catch (err) {
     await conn.rollback();
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();
@@ -284,6 +294,7 @@ exports.getStok = async (req, res) => {
 
     res.json({ idbarang: parseInt(idbarang), stok, tgl: targetDate });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };

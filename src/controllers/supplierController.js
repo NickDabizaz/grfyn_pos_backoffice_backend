@@ -1,5 +1,6 @@
 const { tenantQuery, tenantExecute, getTenantContext } = require('../config/db');
 const { generateKodeMaster } = require('../lib/kodetrans');
+const logger = require('../lib/logger');
 
 exports.getAll = async (req, res) => {
   try {
@@ -11,6 +12,7 @@ exports.getAll = async (req, res) => {
     const rows = await tenantQuery(sql, params);
     res.json(rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -26,6 +28,7 @@ exports.create = async (req, res) => {
     );
     res.status(201).json({ message: 'Supplier berhasil ditambah', kodesupplier });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -38,6 +41,7 @@ exports.update = async (req, res) => {
       [namasupplier, alamat, hp, req.params.id, ctx.idtenant]);
     res.json({ message: 'Supplier berhasil diupdate' });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -54,6 +58,7 @@ exports.remove = async (req, res) => {
     await tenantExecute('DELETE FROM supplier WHERE idsupplier = ? AND idtenant = ?', [req.params.id, ctx.idtenant]);
     res.json({ message: 'Supplier berhasil dihapus' });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };

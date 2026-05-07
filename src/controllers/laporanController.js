@@ -1,4 +1,5 @@
 const { tenantQuery, getTenantContext, pool } = require('../config/db');
+const logger = require('../lib/logger');
 
 exports.salesTransaksi = async (req, res) => {
   try {
@@ -38,6 +39,7 @@ exports.salesTransaksi = async (req, res) => {
 
     res.json({ data: rows, totalTransaksi, totalPenjualan });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -77,6 +79,7 @@ exports.salesPerCustomer = async (req, res) => {
 
     res.json({ data: rows, grandTotal });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -117,6 +120,7 @@ exports.salesPerBarang = async (req, res) => {
 
     res.json({ data: rows, grandTotal });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -153,6 +157,7 @@ exports.pembelian = async (req, res) => {
 
     res.json({ data: rows, totalPembelian });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -211,6 +216,7 @@ exports.stok = async (req, res) => {
 
     res.json({ data: rows, totalBarang, totalStok, periodSaldo: latestSaldo?.tgltrans });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -247,6 +253,7 @@ exports.kartuStok = async (req, res) => {
 
     res.json({ data: rows });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -290,6 +297,7 @@ exports.struk = async (req, res) => {
 
     res.json({ data: jual, detail });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -333,6 +341,7 @@ exports.faktur = async (req, res) => {
 
     res.json({ data: jual, detail });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };

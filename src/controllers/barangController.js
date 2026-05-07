@@ -1,5 +1,6 @@
 const { tenantQuery, tenantExecute, getConnection, getTenantContext } = require('../config/db');
 const { generateKodeMaster } = require('../lib/kodetrans');
+const logger = require('../lib/logger');
 
 exports.getAll = async (req, res) => {
   try {
@@ -19,6 +20,7 @@ exports.getAll = async (req, res) => {
     const rows = await tenantQuery(sql, params);
     res.json(rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -37,6 +39,7 @@ exports.getOne = async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ message: 'Barang tidak ditemukan' });
     res.json(rows[0]);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -68,6 +71,7 @@ exports.create = async (req, res) => {
     res.status(201).json({ message: 'Barang berhasil ditambah', idbarang, kodebarang });
   } catch (err) {
     await conn.rollback();
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();
@@ -119,6 +123,7 @@ exports.update = async (req, res) => {
     res.json({ message: 'Barang berhasil diupdate' });
   } catch (err) {
     await conn.rollback();
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();
@@ -131,6 +136,7 @@ exports.remove = async (req, res) => {
     await tenantExecute('DELETE FROM barang WHERE idbarang = ? AND idtenant = ?', [req.params.id, ctx.idtenant]);
     res.json({ message: 'Barang berhasil dihapus' });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -141,6 +147,7 @@ exports.getHargaBeli = async (req, res) => {
     const rows = await tenantQuery('SELECT * FROM hargabeli WHERE idbarang = ? ORDER BY tgltrans DESC, idhargabeli DESC', [req.params.id]);
     res.json(rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -151,6 +158,7 @@ exports.getHargaJual = async (req, res) => {
     const rows = await tenantQuery('SELECT * FROM hargajual WHERE idbarang = ? ORDER BY tgltrans DESC, idhargajual DESC', [req.params.id]);
     res.json(rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -164,6 +172,7 @@ exports.checkPrice = async (req, res) => {
     const warnings = rows.filter(r => r.hargajual && r.hargabeli && parseFloat(r.hargajual) < parseFloat(r.hargabeli));
     res.json({ total: rows.length, warnings: warnings.length, items: warnings });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };

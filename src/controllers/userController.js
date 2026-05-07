@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const { tenantQuery, tenantExecute, getConnection, getTenantContext } = require('../config/db');
+const logger = require('../lib/logger');
 
 exports.getAll = async (req, res) => {
   try {
@@ -14,6 +15,7 @@ exports.getAll = async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -28,6 +30,7 @@ exports.getOne = async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ message: 'User tidak ditemukan' });
     res.json(rows[0]);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -106,12 +109,14 @@ exports.create = async (req, res) => {
     }
 
     await conn.commit();
+    await logger.history('USER_CREATE', { idtenant: ctx.idtenant, iduser: ctx.iduser, ref: username, req });
     res.status(201).json({ message: 'User berhasil ditambah', iduser });
   } catch (err) {
     await conn.rollback();
     if (err.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ message: 'Username sudah digunakan' });
     }
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();
@@ -167,9 +172,11 @@ exports.update = async (req, res) => {
     }
 
     await conn.commit();
+    await logger.history('USER_UPDATE', { idtenant: ctx.idtenant, iduser: ctx.iduser, ref: String(id), req });
     res.json({ message: 'User berhasil diupdate' });
   } catch (err) {
     await conn.rollback();
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();
@@ -197,8 +204,10 @@ exports.resetPassword = async (req, res) => {
       [hash, id]
     );
 
+    await logger.history('USER_RESET_PASSWORD', { idtenant: ctx.idtenant, iduser: ctx.iduser, ref: String(id), req });
     res.json({ message: 'Password berhasil direset' });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -213,6 +222,7 @@ exports.getMenus = async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -227,6 +237,7 @@ exports.getLokasis = async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -242,6 +253,7 @@ exports.getAllTemplates = async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -256,6 +268,7 @@ exports.getTemplateDetail = async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -285,6 +298,7 @@ exports.createTemplate = async (req, res) => {
     res.status(201).json({ message: 'Template berhasil ditambah', idmenutemplate });
   } catch (err) {
     await conn.rollback();
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();
@@ -319,6 +333,7 @@ exports.updateTemplate = async (req, res) => {
     res.json({ message: 'Template berhasil diupdate' });
   } catch (err) {
     await conn.rollback();
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();
@@ -334,6 +349,7 @@ exports.deleteTemplate = async (req, res) => {
     );
     res.json({ message: 'Template berhasil dihapus' });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };

@@ -1,5 +1,6 @@
 const { pool, getConnection, getTenantContext, tenantQuery, tenantExecute } = require('../config/db');
 const fs = require('fs');
+const logger = require('../lib/logger');
 
 function parseCSV(content) {
   const lines = content.replace(/\r/g, '').split('\n').filter(l => l.trim());
@@ -50,6 +51,7 @@ exports.exportBarang = async (req, res) => {
     FROM barang b ORDER BY b.kodebarang`);
     sendCSV(res, 'barang.csv', ['kodebarang', 'namabarang', 'satuanbesar', 'satuansedang', 'satuankecil', 'konversi1', 'konversi2', 'jenis', 'stokmin', 'status', 'hargabeli', 'hargajual'], rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -59,6 +61,7 @@ exports.exportCustomer = async (req, res) => {
     const rows = await tenantQuery('SELECT kodecustomer, namacustomer, alamat, hp FROM customer ORDER BY idcustomer');
     sendCSV(res, 'customer.csv', ['kodecustomer', 'namacustomer', 'alamat', 'hp'], rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -68,6 +71,7 @@ exports.exportSupplier = async (req, res) => {
     const rows = await tenantQuery('SELECT kodesupplier, namasupplier, alamat, hp FROM supplier ORDER BY idsupplier');
     sendCSV(res, 'supplier.csv', ['kodesupplier', 'namasupplier', 'alamat', 'hp'], rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -85,6 +89,7 @@ exports.exportBeli = async (req, res) => {
     WHERE b.idlokasi = ? ORDER BY b.tgltrans DESC, b.idbeli DESC`, [ctx.idlokasi]);
     sendCSV(res, 'pembelian.csv', ['kodebeli', 'tgltrans', 'kodesupplier', 'namasupplier', 'kodebarang', 'namabarang', 'jml', 'harga', 'ppn', 'diskon', 'subtotal', 'grandtotal', 'bayar', 'status'], rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -102,6 +107,7 @@ exports.exportJual = async (req, res) => {
     WHERE j.idlokasi = ? ORDER BY j.tgltrans DESC, j.idjual DESC`, [ctx.idlokasi]);
     sendCSV(res, 'penjualan.csv', ['kodejual', 'tgltrans', 'kodecustomer', 'namacustomer', 'kodebarang', 'namabarang', 'jml', 'harga', 'ppn', 'diskon', 'subtotal', 'grandtotal', 'bayar', 'kembali', 'status'], rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -149,9 +155,11 @@ exports.importBarang = async (req, res) => {
     }
 
     await conn.commit();
+    await logger.history('IMPORT_BARANG', { idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser, ref: `imported_${success}`, req });
     res.json({ message: `Berhasil import ${success} barang`, success, errors });
   } catch (err) {
     await conn.rollback();
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();
@@ -191,9 +199,11 @@ exports.importCustomer = async (req, res) => {
     }
 
     await conn.commit();
+    await logger.history('IMPORT_CUSTOMER', { idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser, ref: `imported_${success}`, req });
     res.json({ message: `Berhasil import ${success} customer`, success, errors });
   } catch (err) {
     await conn.rollback();
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();
@@ -233,9 +243,11 @@ exports.importSupplier = async (req, res) => {
     }
 
     await conn.commit();
+    await logger.history('IMPORT_SUPPLIER', { idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser, ref: `imported_${success}`, req });
     res.json({ message: `Berhasil import ${success} supplier`, success, errors });
   } catch (err) {
     await conn.rollback();
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();

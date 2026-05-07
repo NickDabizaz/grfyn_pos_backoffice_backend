@@ -1,5 +1,6 @@
 const { tenantQuery, tenantExecute, getConnection, getTenantContext } = require('../config/db');
 const { generateKodeBeli } = require('../lib/kodetrans');
+const logger = require('../lib/logger');
 
 exports.create = async (req, res) => {
   const conn = await getConnection();
@@ -61,9 +62,11 @@ exports.create = async (req, res) => {
       [calculatedGrandTotal, header.idbeli, ctx.idtenant, ctx.idlokasi]);
 
     await conn.commit();
+    await logger.history('BELI_CREATE', { idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser, ref: kodebeli, detail: { grandtotal: calculatedGrandTotal }, req });
     res.status(201).json({ message: 'Pembelian berhasil', kodebeli, idbeli: header.idbeli, grandtotal: calculatedGrandTotal });
   } catch (err) {
     await conn.rollback();
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();
@@ -88,6 +91,7 @@ exports.getAll = async (req, res) => {
     const rows = await tenantQuery(sql, params);
     res.json(rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -107,6 +111,7 @@ exports.getOne = async (req, res) => {
       WHERE bd.idbeli = ?`, [req.params.id]);
     res.json({ ...rows[0], items });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -134,9 +139,11 @@ exports.cancel = async (req, res) => {
     }
 
     await conn.commit();
+    await logger.history('BELI_CANCEL', { idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser, ref: beli.kodebeli, req });
     res.json({ message: 'Pembelian berhasil dibatalkan' });
   } catch (err) {
     await conn.rollback();
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();

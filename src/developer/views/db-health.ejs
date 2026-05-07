@@ -1,0 +1,68 @@
+<% if (locals.error) { %>
+  <div class="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400"><%= error %></div>
+<% } %>
+
+<div class="mb-6">
+  <h1 class="text-xl font-bold text-white">Database Monitoring</h1>
+  <p class="text-sm text-gray-500 mt-1">Pool stats, DB size, table info, connection health</p>
+</div>
+
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+  <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+    <div class="text-xs text-gray-500 mb-1">DB Size</div>
+    <div class="text-2xl font-bold text-white"><%= dbSize %> MB</div>
+  </div>
+  <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+    <div class="text-xs text-gray-500 mb-1">Latency</div>
+    <div class="text-2xl font-bold <%= latency < 10 ? 'text-green-400' : latency < 50 ? 'text-yellow-400' : 'text-red-400' %>"><%= latency %> ms</div>
+  </div>
+  <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+    <div class="text-xs text-gray-500 mb-1">Connections</div>
+    <div class="text-2xl font-bold text-white"><%= poolInfo.threadsConnected %> / <%= poolInfo.maxConnections %></div>
+    <div class="text-xs text-gray-500 mt-1"><%= poolInfo.threadsRunning %> running</div>
+  </div>
+  <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+    <div class="text-xs text-gray-500 mb-1">Total Connects</div>
+    <div class="text-2xl font-bold text-white"><%= poolInfo.totalConnections %></div>
+    <div class="text-xs text-gray-500 mt-1"><%= poolInfo.slowQueries %> slow queries</div>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <div>
+    <h2 class="text-sm font-semibold text-white mb-3">Table Row Counts</h2>
+    <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+      <table class="w-full text-sm">
+        <thead><tr class="border-b border-gray-800"><th class="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase">Table</th><th class="text-right px-4 py-2.5 text-xs font-medium text-gray-400 uppercase">Size (MB)</th><th class="text-right px-4 py-2.5 text-xs font-medium text-gray-400 uppercase">Rows</th></tr></thead>
+        <tbody class="divide-y divide-gray-800">
+          <% tables.forEach(t => { %>
+          <tr class="hover:bg-gray-800/50"><td class="px-4 py-2 text-gray-300 font-mono text-xs"><%= t.table_name %></td><td class="px-4 py-2 text-gray-400 text-right text-xs"><%= t.size_mb %></td><td class="px-4 py-2 text-gray-400 text-right text-xs"><%= t.table_rows %></td></tr>
+          <% }); %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div>
+    <h2 class="text-sm font-semibold text-white mb-3">Connection Pool</h2>
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+      <% const poolItems = [
+        { label: 'Max Connections', value: poolInfo.maxConnections },
+        { label: 'Threads Connected', value: poolInfo.threadsConnected },
+        { label: 'Threads Running', value: poolInfo.threadsRunning },
+        { label: 'Total Connections', value: poolInfo.totalConnections },
+        { label: 'Slow Queries', value: poolInfo.slowQueries },
+        { label: 'Active Processes', value: poolInfo.activeProcesses },
+        { label: 'MySQL Uptime', value: Math.floor(poolInfo.uptime / 3600) + 'h ' + Math.floor((poolInfo.uptime % 3600) / 60) + 'm' }
+      ]; %>
+      <% poolItems.forEach(item => { %>
+        <div class="flex items-center justify-between">
+          <span class="text-sm text-gray-400"><%= item.label %></span>
+          <span class="text-sm font-semibold text-white font-mono"><%= item.value %></span>
+        </div>
+      <% }); %>
+    </div>
+  </div>
+</div>
+
+<script>if(typeof lucide!=='undefined'){lucide.createIcons();}</script>

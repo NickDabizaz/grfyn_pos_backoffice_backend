@@ -1,0 +1,98 @@
+<% if (locals.error) { %>
+  <div class="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400"><%= error %></div>
+<% } %>
+
+<div class="mb-6">
+  <h1 class="text-xl font-bold text-white">Log History Program</h1>
+  <p class="text-sm text-gray-500 mt-1">View audit trail from historyprogram table — <%= totalRows %> records</p>
+</div>
+
+<div class="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
+  <form method="GET" action="/developer/logs/history" class="flex flex-wrap gap-3 items-end">
+    <div>
+      <label class="block text-xs text-gray-400 mb-1">Start Date</label>
+      <input type="date" name="tglwal" value="<%= filters.tglwal %>" class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500">
+    </div>
+    <div>
+      <label class="block text-xs text-gray-400 mb-1">End Date</label>
+      <input type="date" name="tglakhir" value="<%= filters.tglakhir %>" class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500">
+    </div>
+    <div>
+      <label class="block text-xs text-gray-400 mb-1">Action</label>
+      <select name="action" class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500">
+        <option value="">All</option>
+        <% actions.forEach(a => { %>
+          <option value="<%= a %>" <%= filters.action === a ? 'selected' : '' %>><%= a %></option>
+        <% }); %>
+      </select>
+    </div>
+    <div>
+      <label class="block text-xs text-gray-400 mb-1">ID Tenant</label>
+      <input type="number" name="idtenant" value="<%= filters.idtenant %>" class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white w-24 focus:outline-none focus:ring-2 focus:ring-orange-500">
+    </div>
+    <div>
+      <label class="block text-xs text-gray-400 mb-1">Search</label>
+      <input type="text" name="search" value="<%= filters.search %>" placeholder="Keyword..." class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white w-40 focus:outline-none focus:ring-2 focus:ring-orange-500">
+    </div>
+    <button type="submit" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white px-4 py-2 rounded-lg text-sm transition-colors">Filter</button>
+    <a href="/developer/logs/history" class="text-sm text-gray-400 hover:text-white py-2">Clear</a>
+  </form>
+</div>
+
+<div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+  <% if (rows.length === 0) { %>
+    <div class="p-12 text-center text-gray-500">
+      <i data-lucide="history" class="w-10 h-10 mx-auto mb-2 text-gray-600"></i>
+      <p>No history records found</p>
+    </div>
+  <% } else { %>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-gray-800">
+            <th class="text-left px-3 py-2.5 text-xs font-medium text-gray-400 uppercase">Time</th>
+            <th class="text-left px-3 py-2.5 text-xs font-medium text-gray-400 uppercase">Action</th>
+            <th class="text-left px-3 py-2.5 text-xs font-medium text-gray-400 uppercase">Tenant</th>
+            <th class="text-left px-3 py-2.5 text-xs font-medium text-gray-400 uppercase">Lokasi</th>
+            <th class="text-left px-3 py-2.5 text-xs font-medium text-gray-400 uppercase">User</th>
+            <th class="text-left px-3 py-2.5 text-xs font-medium text-gray-400 uppercase">Ref</th>
+            <th class="text-left px-3 py-2.5 text-xs font-medium text-gray-400 uppercase">Detail</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-800">
+          <% rows.forEach(row => { %>
+          <tr class="hover:bg-gray-800/50 transition-colors">
+            <td class="px-3 py-2 text-xs text-gray-500 font-mono whitespace-nowrap"><%= new Date(row.tglentry).toLocaleString('id-ID') %></td>
+            <td class="px-3 py-2">
+              <span class="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-gray-500/10 text-gray-400"><%= row.action %></span>
+            </td>
+            <td class="px-3 py-2 text-xs text-gray-400 font-mono"><%= row.idtenant || '-' %></td>
+            <td class="px-3 py-2 text-xs text-gray-400 font-mono"><%= row.idlokasi || '-' %></td>
+            <td class="px-3 py-2 text-xs text-gray-400 font-mono"><%= row.iduser || '-' %></td>
+            <td class="px-3 py-2 text-xs text-gray-300"><%= row.ref || '-' %></td>
+            <td class="px-3 py-2 text-xs text-gray-500 max-w-xs truncate">
+              <% if (row.detail) { %>
+                <% try { %><%= JSON.stringify(typeof row.detail === 'string' ? JSON.parse(row.detail) : row.detail).substring(0, 100) %><% } catch(_) { %><%= String(row.detail).substring(0, 100) %><% } %>
+              <% } else { %>-<% } %>
+            </td>
+          </tr>
+          <% }); %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+
+  <% if (totalPages > 1) { %>
+    <div class="px-4 py-3 border-t border-gray-800 flex items-center justify-center gap-2">
+      <% if (currentPage > 1) { %>
+        <a href="?tglwal=<%= filters.tglwal %>&tglakhir=<%= filters.tglakhir %>&action=<%= filters.action %>&idtenant=<%= filters.idtenant %>&search=<%= filters.search %>&page=<%= currentPage - 1 %>" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded text-sm text-gray-300">Prev</a>
+      <% } %>
+      <span class="text-sm text-gray-500">Page <%= currentPage %> of <%= totalPages %></span>
+      <% if (currentPage < totalPages) { %>
+        <a href="?tglwal=<%= filters.tglwal %>&tglakhir=<%= filters.tglakhir %>&action=<%= filters.action %>&idtenant=<%= filters.idtenant %>&search=<%= filters.search %>&page=<%= currentPage + 1 %>" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded text-sm text-gray-300">Next</a>
+      <% } %>
+    </div>
+  <% } %>
+</div>
+
+<script>if(typeof lucide!=='undefined'){lucide.createIcons();}</script>

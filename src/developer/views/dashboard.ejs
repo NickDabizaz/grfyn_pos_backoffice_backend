@@ -1,0 +1,108 @@
+<% if (locals.error) { %>
+  <div class="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400"><%= error %></div>
+<% } %>
+
+<div class="mb-6">
+  <h1 class="text-xl font-bold text-white">Developer Dashboard</h1>
+  <p class="text-sm text-gray-500 mt-1">System overview & key metrics</p>
+</div>
+
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+  <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+    <div class="flex items-center justify-between mb-3">
+      <div class="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center">
+        <i data-lucide="alert-triangle" class="w-5 h-5 text-red-400"></i>
+      </div>
+      <span class="text-xs text-gray-500">Errors Today</span>
+    </div>
+    <div class="text-3xl font-bold text-white"><%= stats.errorsToday %></div>
+    <div class="text-xs text-gray-500 mt-1">Error log entries today</div>
+  </div>
+
+  <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+    <div class="flex items-center justify-between mb-3">
+      <div class="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+        <i data-lucide="activity" class="w-5 h-5 text-blue-400"></i>
+      </div>
+      <span class="text-xs text-gray-500">Recent Activity</span>
+    </div>
+    <div class="text-3xl font-bold text-white"><%= stats.historyToday %></div>
+    <div class="text-xs text-gray-500 mt-1">Recent log entries</div>
+  </div>
+
+  <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+    <div class="flex items-center justify-between mb-3">
+      <div class="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center">
+        <i data-lucide="database" class="w-5 h-5 text-green-400"></i>
+      </div>
+      <span class="text-xs text-gray-500">Database</span>
+    </div>
+    <div class="text-lg font-bold text-green-400"><%= stats.dbStatus %></div>
+    <div class="text-xs text-gray-500 mt-1"><%= stats.dbConnections %> connections</div>
+  </div>
+
+  <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+    <div class="flex items-center justify-between mb-3">
+      <div class="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
+        <i data-lucide="clock" class="w-5 h-5 text-purple-400"></i>
+      </div>
+      <span class="text-xs text-gray-500">OS Uptime</span>
+    </div>
+    <div class="text-2xl font-bold text-white"><%= stats.osUptime %></div>
+    <div class="text-xs text-gray-500 mt-1">Process: <%= stats.processUptime %></div>
+  </div>
+
+  <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+    <div class="flex items-center justify-between mb-3">
+      <div class="w-10 h-10 rounded-lg bg-yellow-500/10 flex items-center justify-center">
+        <i data-lucide="hard-drive" class="w-5 h-5 text-yellow-400"></i>
+      </div>
+      <span class="text-xs text-gray-500">Memory</span>
+    </div>
+    <div class="text-2xl font-bold text-white"><%= stats.freeMem %> GB</div>
+    <div class="text-xs text-gray-500 mt-1">Free / <%= stats.totalMem %> GB Total</div>
+  </div>
+
+  <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+    <div class="flex items-center justify-between mb-3">
+      <div class="w-10 h-10 rounded-lg bg-teal-500/10 flex items-center justify-center">
+        <i data-lucide="cpu" class="w-5 h-5 text-teal-400"></i>
+      </div>
+      <span class="text-xs text-gray-500">Environment</span>
+    </div>
+    <div class="text-lg font-bold text-white"><%= stats.nodeVersion %></div>
+    <div class="text-xs text-gray-500 mt-1"><%= stats.platform %></div>
+  </div>
+</div>
+
+<% if (recentHistory && recentHistory.length > 0) { %>
+<div>
+  <h2 class="text-lg font-semibold text-white mb-3">Recent Activity</h2>
+  <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="border-b border-gray-800">
+          <th class="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase">Action</th>
+          <th class="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase">Tenant</th>
+          <th class="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase">Ref</th>
+          <th class="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase">Time</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-800">
+        <% recentHistory.forEach(row => { %>
+        <tr class="hover:bg-gray-800/50 transition-colors">
+          <td class="px-4 py-2.5 font-mono text-xs">
+            <span class="inline-flex px-2 py-0.5 rounded text-xs font-medium <%= row.action === 'DEV_LOGIN' ? 'bg-green-500/10 text-green-400' : 'bg-gray-500/10 text-gray-400' %>"><%= row.action %></span>
+          </td>
+          <td class="px-4 py-2.5 text-gray-400 font-mono text-xs"><%= row.idtenant || '-' %></td>
+          <td class="px-4 py-2.5 text-gray-300 text-xs"><%= row.ref || '-' %></td>
+          <td class="px-4 py-2.5 text-gray-500 text-xs"><%= new Date(row.tglentry).toLocaleString('id-ID') %></td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+</div>
+<% } %>
+
+<script>if(typeof lucide!=='undefined'){lucide.createIcons();}</script>

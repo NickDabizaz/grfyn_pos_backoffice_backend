@@ -34,7 +34,7 @@ async function migrate() {
     'menutemplate',
     'user', 'lokasi', 'tenant',
     'menu', 'mcurrency',
-    'users'
+    'users', 'historyprogram'
   ];
   for (const t of tables) {
     await connection.query(`DROP TABLE IF EXISTS \`${t}\``);
@@ -601,6 +601,80 @@ async function migrate() {
     ) ENGINE=InnoDB
   `);
 
+  // historyprogram — developer portal audit log
+  await connection.query(`
+    CREATE TABLE historyprogram (
+      idhistory     BIGINT AUTO_INCREMENT PRIMARY KEY,
+      idtenant      INT DEFAULT NULL,
+      idlokasi      INT DEFAULT NULL,
+      iduser        INT DEFAULT NULL,
+      action        VARCHAR(100) NOT NULL,
+      ref           VARCHAR(50) DEFAULT NULL,
+      detail        JSON DEFAULT NULL,
+      ip            VARCHAR(45) DEFAULT NULL,
+      useragent     VARCHAR(255) DEFAULT NULL,
+      tglentry      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_history_tenant (idtenant),
+      INDEX idx_history_action (action),
+      INDEX idx_history_tgl (tglentry)
+    ) ENGINE=InnoDB
+  `);
+
+  // hitunghpp — HPP calculation header
+  await connection.query(`
+    CREATE TABLE hitunghpp (
+      idhitunghpp     INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant        INT NOT NULL,
+      idlokasi        INT NOT NULL,
+      kodehitunghpp   VARCHAR(30) NOT NULL,
+      periodbulan     VARCHAR(7) NOT NULL,
+      tglawal         DATE NOT NULL,
+      tglakhir        DATE NOT NULL,
+      iduser          INT NOT NULL,
+      totalpembelian  DECIMAL(15,2) DEFAULT 0,
+      totalhppjual    DECIMAL(15,2) DEFAULT 0,
+      totalsaldoakhir DECIMAL(15,2) DEFAULT 0,
+      catatan         TEXT,
+      status          VARCHAR(20) DEFAULT 'AKTIF',
+      userentry       INT NOT NULL,
+      tglentry        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
+      FOREIGN KEY (iduser) REFERENCES user(iduser),
+      FOREIGN KEY (userentry) REFERENCES user(iduser),
+      INDEX idx_hitunghpp_tenant_lokasi (idtenant, idlokasi, periodbulan),
+      UNIQUE KEY uq_hitunghpp_period (idtenant, idlokasi, periodbulan, status)
+    ) ENGINE=InnoDB
+  `);
+
+  // hitunghppdtl — HPP calculation detail per barang
+  await connection.query(`
+    CREATE TABLE hitunghppdtl (
+      idhitunghppdtl  INT AUTO_INCREMENT PRIMARY KEY,
+      idhitunghpp     INT NOT NULL,
+      idtenant        INT NOT NULL,
+      idbarang        INT NOT NULL,
+      saldoawal_qty       DECIMAL(15,2) DEFAULT 0,
+      saldoawal_nilai     DECIMAL(15,2) DEFAULT 0,
+      pembelian_qty       DECIMAL(15,2) DEFAULT 0,
+      pembelian_nilai     DECIMAL(15,2) DEFAULT 0,
+      total_qty           DECIMAL(15,2) DEFAULT 0,
+      total_nilai         DECIMAL(15,2) DEFAULT 0,
+      hpp_per_unit        DECIMAL(15,4) DEFAULT 0,
+      qty_jual            DECIMAL(15,2) DEFAULT 0,
+      hpp_jual            DECIMAL(15,2) DEFAULT 0,
+      qty_adjust          DECIMAL(15,2) DEFAULT 0,
+      hpp_adjust          DECIMAL(15,2) DEFAULT 0,
+      saldoakhir_qty      DECIMAL(15,2) DEFAULT 0,
+      saldoakhir_nilai    DECIMAL(15,2) DEFAULT 0,
+      FOREIGN KEY (idhitunghpp) REFERENCES hitunghpp(idhitunghpp) ON DELETE CASCADE,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idbarang) REFERENCES barang(idbarang),
+      INDEX idx_hitunghppdtl_hdr (idhitunghpp),
+      INDEX idx_hitunghppdtl_barang (idbarang)
+    ) ENGINE=InnoDB
+  `);
+
   console.log('All tables created');
 
   // ============================================================
@@ -653,6 +727,7 @@ async function migrate() {
     [16, 6, 'stok.saldoawal',    'Saldo Awal Stok',             1, null, '/stok/saldoawal'],
     [17, 6, 'stok.penyesuaian',  'Penyesuaian Stok',            2, null, '/stok/penyesuaian'],
     [18, 6, 'stok.kartustok',    'Kartu Stok',                  3, null, '/stok/kartustok'],
+    [24, 6, 'stok.hitunghpp',    'Hitung HPP',                  4, null, '/stok/hitunghpp'],
   ];
   for (const m of stokChildren) {
     await connection.query(

@@ -1,5 +1,6 @@
 const { tenantQuery, tenantExecute, getConnection, getTenantContext } = require('../config/db');
 const { generateKodeMaster } = require('../lib/kodetrans');
+const logger = require('../lib/logger');
 
 exports.getAll = async (req, res) => {
   try {
@@ -11,6 +12,7 @@ exports.getAll = async (req, res) => {
     const rows = await tenantQuery(sql, params);
     res.json(rows);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -21,6 +23,7 @@ exports.getOne = async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ message: 'Akun tidak ditemukan' });
     res.json(rows[0]);
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
@@ -43,6 +46,7 @@ exports.create = async (req, res) => {
     res.status(201).json({ message: 'Akun berhasil ditambah', kodeakun });
   } catch (err) {
     await conn.rollback();
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();
@@ -69,6 +73,7 @@ exports.update = async (req, res) => {
     res.json({ message: 'Akun berhasil diupdate' });
   } catch (err) {
     await conn.rollback();
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();
@@ -87,6 +92,7 @@ exports.remove = async (req, res) => {
     await tenantExecute('DELETE FROM akun WHERE idakun = ? AND idtenant = ?', [req.params.id, ctx.idtenant]);
     res.json({ message: 'Akun berhasil dihapus' });
   } catch (err) {
+    logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
