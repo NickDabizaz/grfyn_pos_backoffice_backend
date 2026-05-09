@@ -297,3 +297,180 @@ exports.templateJual = (req, res) => {
     [{ tgltrans: '2025-01-01', idcustomer: '1', kodebarang: 'BRG0001', jml: '5', harga: '15000', ppn: '8250', diskon: '0' }]
   );
 };
+
+exports.importJualBatch = async (req, res) => {
+  if (!req.file) return res.status(400).json({ message: 'File CSV wajib diupload' });
+  const conn = await getConnection();
+  try {
+    const ctx = getTenantContext();
+    await conn.beginTransaction();
+    const content = fs.readFileSync(req.file.path, 'utf-8');
+    const { rows } = parseCSV(content);
+
+    if (!rows.length) return res.status(400).json({ message: 'File CSV kosong' });
+
+    const requiredHeaders = ['kodejual', 'tgltrans', 'namacustomer', 'namalokasi', 'namabarang', 'qty', 'harga', 'diskon', 'ppn', 'subtotal', 'grandtotal'];
+    const firstRow = rows[0];
+    const missingHeaders = requiredHeaders.filter(h => !(h in firstRow));
+    if (missingHeaders.length > 0) {
+      return res.status(400).json({ message: `Header wajib tidak ditemukan: ${missingHeaders.join(', ')}` });
+    }
+
+    const [[tenant]] = await conn.query('SELECT ppn FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+    const ppnPercent = tenant ? parseFloat(tenant.ppn) : 11;
+    const errors = [];
+    const grouped = {};
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const row = i + 2;
+      const kodejual = (r.kodejual || '').trim().toUpperCase();
+      const tgltrans = (r.tgltrans || '').trim();
+      const namacustomer = (r.namacustomer || '').trim().toUpperCase();
+      const namalokasi = (r.namalokasi || '').trim().toUpperCase();
+      const namabarang = (r.namabarang || '').trim().toUpperCase();
+      const qty = parseFloat(r.qty);
+      const harga = parseFloat(r.harga);
+      const diskon = parseFloat(r.diskon || 0);
+      const ppn = parseFloat(r.ppn || 0);
+      const subtotal = parseFloat(r.subtotal);
+      const grandtotal = parseFloat(r.grandtotal);
+
+      const [[dupJual]] = await conn.query(
+        'SELECT kodejual FROM jual WHERE kodejual = ? AND idtenant = ? AND idlokasi = ?',
+        [kodejual, ctx.idtenant, ctx.idlokasi]
+      );
+      if (dupJual) { errors.push(`Baris ${row}: kodejual ${kodejual} sudah terdaftar`); continue; }
+
+      const [[lokasiRow]] = await conn.query(
+        "SELECT idlokasi FROM lokasi WHERE UPPER(namalokasi) = ? AND idtenant = ?",
+        [namalokasi, ctx.idtenant]
+      );
+      if (!lokasiRow) { errors.push(`Baris ${row}: lokasi ${namalokasi} tidak ditemukan`); continue; }
+
+      const [[customerRow]] = await conn.query(
+        "SELECT idcustomer FROM customer WHERE UPPER(namacustomer) = ? AND idtenant = ?",
+        [namacustomer, ctx.idtenant]
+      );
+      if (!customerRow && namacustomer) { errors.push(`Baris ${row}: customer ${namacustomer} tidak ditemukan`); continue; }
+
+      const [[barangRow]] = await conn.query(
+        "SELECT idbarang FROM barang WHERE UPPER(namabarang) = ? AND idtenant = ?",
+        [namabarang, ctx.idtenant]
+      );
+      if (!barangRow) { errors.push(`Baris ${row}: barang ${namabarang} tidak ditemukan`); continue; }
+
+      if (isNaN(qty) || qty <= 0) { errors.push(`Baris ${row}: qty tidak valid`); continue; }
+      if (isNaN(harga) || harga < 0) { errors.push(`Baris ${row}: harga tidak valid`); continue; }
+      if (isNaN(diskon) || diskon < 0) { errors.push(`Baris ${row}: diskon tidak valid`); continue; }
+
+      const calcSubtotal = (harga * qty) - (harga * qty * diskon / 100) + ppn;
+      if (Math.abs(calcSubtotal - subtotal) > 1) {
+        errors.push(`Baris ${row}: subtotal di file ${subtotal} tidak cocok hitungan ${calcSubtotal.toFixed(0)}`);
+        continue;
+      }
+
+      if (!grouped[kodejual]) {
+        grouped[kodejual] = { tgltrans, idlokasi: lokasiRow.idlokasi, idcustomer: customerRow ? customerRow.idcustomer : null, grandtotal: parseFloat(grandtotal), items: [] };
+      }
+      grouped[kodejual].items.push({ idbarang: barangRow.idbarang, jml: qty, harga, diskon, ppn_mode: ppn > 0 ? 'INCLUDE' : 'TIDAK_PAKAI' });
+    }
+
+    if (errors.length > 0) {
+      await conn.rollback();
+      return res.status(400).json({ message: `Import gagal. Ditemukan ${errors.length} kesalahan:\n${errors.join('\n')}` });
+    }
+
+    let totalTransactions = 0;
+    let totalItems = 0;
+
+    const { generateKodeJual } = require('../lib/kodetrans');
+
+    for (const [kodejual, group] of Object.entries(grouped)) {
+      const calculatedGrandTotal = group.items.reduce((s, i) => s + (i.harga * i.jml) - (i.harga * i.jml * (i.diskon || 0) / 100) + (i.ppn_mode === 'INCLUDE' ? (i.harga * i.jml * ppnPercent) / 100 : 0), 0);
+      if (Math.abs(calculatedGrandTotal - group.grandtotal) > 1) {
+        await conn.rollback();
+        return res.status(400).json({ message: `grandtotal untuk ${kodejual} tidak cocok` });
+      }
+
+      const effectiveKode = kodejual;
+      await conn.query(
+        'INSERT INTO jual (idtenant, idlokasi, kodejual, tgltrans, idcustomer, iduser, grandtotal, bayar, kembali, jenis, metodbayar, status, userentry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)',
+        [ctx.idtenant, group.idlokasi, effectiveKode, group.tgltrans, group.idcustomer, ctx.iduser, calculatedGrandTotal, calculatedGrandTotal, 'JUAL', 'TUNAI', 'LUNAS', ctx.iduser]
+      );
+
+      const [[header]] = await conn.query(
+        'SELECT idjual FROM jual WHERE kodejual = ? AND idtenant = ? AND idlokasi = ?',
+        [effectiveKode, ctx.idtenant, group.idlokasi]
+      );
+
+      for (const item of group.items) {
+        const ppnAmount = item.ppn_mode === 'INCLUDE' ? (item.harga * item.jml * ppnPercent) / 100 : 0;
+        const diskonAmt = item.diskon ? (item.harga * item.jml * item.diskon) / 100 : 0;
+        const subtotal = (item.harga * item.jml) + ppnAmount - diskonAmt;
+
+        await conn.query(
+          'INSERT INTO jualdtl (idjual, idtenant, idbarang, jml, harga, ppn, diskon, subtotal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [header.idjual, ctx.idtenant, item.idbarang, item.jml, item.harga, ppnAmount, item.diskon || 0, subtotal]
+        );
+
+        await conn.query(
+          'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [ctx.idtenant, group.idlokasi, effectiveKode, item.idbarang, item.jml, 'K', group.tgltrans, `Penjualan ${effectiveKode}`, header.idjual, 'jual']
+        );
+
+        const [[latestJual]] = await conn.query(
+          'SELECT hargajual FROM hargajual WHERE idbarang = ? AND idtenant = ? ORDER BY tgltrans DESC, idhargajual DESC LIMIT 1',
+          [item.idbarang, ctx.idtenant]
+        );
+        if (!latestJual || parseFloat(latestJual.hargajual) !== item.harga) {
+          await conn.query('INSERT INTO hargajual (idtenant, idbarang, hargajual, tgltrans) VALUES (?, ?, ?, ?)',
+            [ctx.idtenant, item.idbarang, item.harga, group.tgltrans]);
+        }
+
+        totalItems++;
+      }
+
+      await conn.query(
+        'INSERT INTO kartupiutang (idtenant, idlokasi, idcustomer, kodetrans, jenis, amount, tgltrans, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [ctx.idtenant, group.idlokasi, group.idcustomer, effectiveKode, 'JUAL', calculatedGrandTotal, group.tgltrans, 'LUNAS']
+      );
+
+      const [[akunKas]] = await conn.query("SELECT idakun FROM akun WHERE namaakun = 'KAS' AND idtenant = ? LIMIT 1", [ctx.idtenant]);
+      const [[akunJual]] = await conn.query("SELECT idakun FROM akun WHERE namaakun = 'PENJUALAN' AND idtenant = ? LIMIT 1", [ctx.idtenant]);
+      if (akunKas) {
+        await conn.query('INSERT INTO jurnal (idtenant, idlokasi, idtrans, kodetrans, jenis, idakun, posisi, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [ctx.idtenant, group.idlokasi, header.idjual, effectiveKode, 'jual', akunKas.idakun, 'DEBET', calculatedGrandTotal]);
+      }
+      if (akunJual) {
+        await conn.query('INSERT INTO jurnal (idtenant, idlokasi, idtrans, kodetrans, jenis, idakun, posisi, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [ctx.idtenant, group.idlokasi, header.idjual, effectiveKode, 'jual', akunJual.idakun, 'KREDIT', calculatedGrandTotal]);
+      }
+
+      totalTransactions++;
+    }
+
+    await conn.commit();
+    if (req.file && req.file.path) fs.unlinkSync(req.file.path);
+    await logger.history('IMPORT_JUAL_BATCH', { idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser, detail: { transactions: totalTransactions, items: totalItems }, req });
+    res.json({ message: `Import berhasil: ${totalTransactions} transaksi, ${totalItems} item` });
+  } catch (err) {
+    await conn.rollback();
+    logger.error(err, { req });
+    res.status(500).json({ message: err.message });
+  } finally {
+    conn.release();
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+      try { fs.unlinkSync(req.file.path); } catch (_) {}
+    }
+  }
+};
+
+exports.templateJualBatch = (req, res) => {
+  sendCSV(res, 'template_penjualan_batch.csv',
+    ['kodejual', 'tgltrans', 'namacustomer', 'namalokasi', 'namabarang', 'qty', 'harga', 'diskon', 'ppn', 'subtotal', 'grandtotal'],
+    [
+      { kodejual: 'JL.EXA.250109.001', tgltrans: '2025-01-09', namacustomer: 'TOKO MAJU', namalokasi: 'CABANG UTAMA', namabarang: 'ROTI TAWAR', qty: '10', harga: '15000', diskon: '0', ppn: '16500', subtotal: '166500', grandtotal: '166500' }
+    ]
+  );
+};

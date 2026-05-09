@@ -29,5 +29,7 @@ router.get('/beli/template', auth, ctrl.templateBeli);
 router.get('/jual/export', auth, ctrl.exportJual);
 router.post('/jual/import', auth, upload.single('file'), ctrl.importJual);
 router.get('/jual/template', auth, ctrl.templateJual);
+router.post('/jual/batch', auth, upload.single('file'), ctrl.importJualBatch);
+router.get('/jual/batch/template', auth, ctrl.templateJualBatch);
 
 module.exports = router;

@@ -27,6 +27,8 @@ async function migrate() {
     'penyesuaianstokdtl', 'penyesuaianstok',
     'kartustok',
     'tukarbarangdtl_baru', 'tukarbarangdtl_kembali', 'tukarbarang',
+    'pelunasanpiutangdtl', 'pelunasanpiutang', 'kartupiutang',
+    'pelunasanhutangdtl', 'pelunasanhutang', 'kartuhutang',
     'returjualdtl', 'returjual',
     'belidtl', 'beli', 'jualdtl', 'jual',
     'hargajual', 'hargabeli',
@@ -47,6 +49,35 @@ async function migrate() {
   // GLOBAL TABLES (shared semua tenant)
   // ============================================================
 
+  // historyprogram
+  await connection.query(`
+    CREATE TABLE historyprogram (
+      idhistory   INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant    INT DEFAULT NULL,
+      idlokasi    INT DEFAULT NULL,
+      iduser      INT DEFAULT NULL,
+      action      VARCHAR(50) NOT NULL,
+      ref         VARCHAR(100) DEFAULT NULL,
+      detail      TEXT DEFAULT NULL,
+      ip          VARCHAR(50) DEFAULT NULL,
+      useragent   VARCHAR(255) DEFAULT NULL,
+      tglentry    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_history_tenant (idtenant),
+      INDEX idx_history_action (action),
+      INDEX idx_history_tgl (tglentry)
+    ) ENGINE=InnoDB
+  `);
+
+  // users (developer admin table)
+  await connection.query(`
+    CREATE TABLE users (
+      idusers   INT AUTO_INCREMENT PRIMARY KEY,
+      username  VARCHAR(50) NOT NULL UNIQUE,
+      pass      VARCHAR(100) NOT NULL,
+      status    VARCHAR(20) DEFAULT 'AKTIF'
+    ) ENGINE=InnoDB
+  `);
+
   // currency
   await connection.query(`
     CREATE TABLE currency (
@@ -62,14 +93,13 @@ async function migrate() {
   // menu
   await connection.query(`
     CREATE TABLE menu (
-      idmenu        INT AUTO_INCREMENT PRIMARY KEY,
-      idparent      INT DEFAULT NULL,
-      kodemenu      VARCHAR(50) NOT NULL UNIQUE,
-      namamenu      VARCHAR(100) NOT NULL,
-      urutan        INT DEFAULT 0,
-      icon          VARCHAR(50) DEFAULT NULL,
-      path          VARCHAR(200) DEFAULT NULL,
-      status        VARCHAR(20) DEFAULT 'AKTIF',
+      idmenu    INT PRIMARY KEY,
+      idparent  INT DEFAULT NULL,
+      kodemenu  VARCHAR(50) NOT NULL UNIQUE,
+      namamenu  VARCHAR(100) NOT NULL,
+      urutan    INT DEFAULT 0,
+      icon      VARCHAR(50) DEFAULT NULL,
+      path      VARCHAR(100) DEFAULT NULL,
       FOREIGN KEY (idparent) REFERENCES menu(idmenu)
     ) ENGINE=InnoDB
   `);
@@ -81,18 +111,17 @@ async function migrate() {
   // tenant
   await connection.query(`
     CREATE TABLE tenant (
-      idtenant      INT AUTO_INCREMENT PRIMARY KEY,
-      namatenant    VARCHAR(200) NOT NULL,
-      alamat        VARCHAR(500),
-      hp            VARCHAR(50),
-      email         VARCHAR(200),
-      npwp          VARCHAR(30),
-      logo          VARCHAR(500),
-      ppn           DECIMAL(5,2) DEFAULT 0,
-      idcurrency    INT NOT NULL DEFAULT 1,
-      status        VARCHAR(20) DEFAULT 'AKTIF',
-      userentry     INT NOT NULL,
-      tglentry      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      idtenant    INT AUTO_INCREMENT PRIMARY KEY,
+      namatenant  VARCHAR(100) NOT NULL,
+      alamat      TEXT DEFAULT NULL,
+      hp          VARCHAR(20) DEFAULT NULL,
+      email       VARCHAR(100) DEFAULT NULL,
+      npwp        VARCHAR(30) DEFAULT NULL,
+      ppn         DECIMAL(5,2) DEFAULT 0,
+      idcurrency  INT DEFAULT 1,
+      logo        VARCHAR(255) DEFAULT NULL,
+      status      VARCHAR(20) DEFAULT 'AKTIF',
+      userentry   INT NOT NULL DEFAULT 0,
       FOREIGN KEY (idcurrency) REFERENCES currency(idcurrency)
     ) ENGINE=InnoDB
   `);
@@ -100,18 +129,17 @@ async function migrate() {
   // lokasi
   await connection.query(`
     CREATE TABLE lokasi (
-      idlokasi      INT AUTO_INCREMENT PRIMARY KEY,
-      idtenant      INT NOT NULL,
-      kodelokasi    VARCHAR(10) NOT NULL,
-      namalokasi    VARCHAR(200) NOT NULL,
-      alamat        VARCHAR(500),
-      hp            VARCHAR(50),
-      isdefault     TINYINT(1) DEFAULT 0,
-      status        VARCHAR(20) DEFAULT 'AKTIF',
-      userentry     INT NOT NULL,
-      tglentry      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      idlokasi    INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant    INT NOT NULL,
+      kodelokasi  VARCHAR(20) NOT NULL,
+      namalokasi  VARCHAR(100) NOT NULL,
+      alamat      TEXT DEFAULT NULL,
+      hp          VARCHAR(20) DEFAULT NULL,
+      isdefault   TINYINT DEFAULT 0,
+      status      VARCHAR(20) DEFAULT 'AKTIF',
+      userentry   INT NOT NULL DEFAULT 0,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
-      INDEX idx_lokasi_tenant (idtenant, idlokasi)
+      UNIQUE KEY uq_lokasi_kode (idtenant, kodelokasi)
     ) ENGINE=InnoDB
   `);
 
@@ -120,31 +148,53 @@ async function migrate() {
     CREATE TABLE user (
       iduser        INT AUTO_INCREMENT PRIMARY KEY,
       idtenant      INT NOT NULL,
-      username      VARCHAR(100) NOT NULL,
-      pass          VARCHAR(255) NOT NULL,
-      namauser      VARCHAR(200) NOT NULL,
-      email         VARCHAR(200),
-      hp            VARCHAR(50),
-      isowner       TINYINT(1) DEFAULT 0,
+      username      VARCHAR(50) NOT NULL,
+      pass          VARCHAR(100) NOT NULL,
+      namauser      VARCHAR(100) NOT NULL,
+      email         VARCHAR(100) DEFAULT NULL,
+      hp            VARCHAR(20) DEFAULT NULL,
+      isowner       TINYINT DEFAULT 0,
       tokenversion  INT DEFAULT 1,
       status        VARCHAR(20) DEFAULT 'AKTIF',
-      userentry     INT NOT NULL,
+      userentry     INT NOT NULL DEFAULT 0,
       tglentry      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
-      INDEX idx_user_tenant (idtenant),
-      INDEX idx_user_username (username)
+      UNIQUE KEY uq_user_username (idtenant, username)
+    ) ENGINE=InnoDB
+  `);
+
+  // menutemplate
+  await connection.query(`
+    CREATE TABLE menutemplate (
+      idmenutemplate  INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant        INT NOT NULL,
+      namatemplate    VARCHAR(100) NOT NULL,
+      status          VARCHAR(20) DEFAULT 'AKTIF',
+      userentry       INT NOT NULL DEFAULT 0,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant)
+    ) ENGINE=InnoDB
+  `);
+
+  // menutemplatedtl
+  await connection.query(`
+    CREATE TABLE menutemplatedtl (
+      idmenutemplatedtl  INT AUTO_INCREMENT PRIMARY KEY,
+      idmenutemplate     INT NOT NULL,
+      idmenu             INT NOT NULL,
+      status             VARCHAR(20) DEFAULT 'AKTIF',
+      FOREIGN KEY (idmenutemplate) REFERENCES menutemplate(idmenutemplate) ON DELETE CASCADE,
+      FOREIGN KEY (idmenu) REFERENCES menu(idmenu)
     ) ENGINE=InnoDB
   `);
 
   // usermenu
   await connection.query(`
     CREATE TABLE usermenu (
-      idusermenu    INT AUTO_INCREMENT PRIMARY KEY,
-      iduser        INT NOT NULL,
-      idmenu        INT NOT NULL,
-      status        VARCHAR(20) DEFAULT 'AKTIF',
-      userentry     INT NOT NULL,
-      tglentry      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      idusermenu  INT AUTO_INCREMENT PRIMARY KEY,
+      iduser      INT NOT NULL,
+      idmenu      INT NOT NULL,
+      status      VARCHAR(20) DEFAULT 'AKTIF',
+      userentry   INT NOT NULL DEFAULT 0,
       FOREIGN KEY (iduser) REFERENCES user(iduser) ON DELETE CASCADE,
       FOREIGN KEY (idmenu) REFERENCES menu(idmenu),
       UNIQUE KEY uq_usermenu (iduser, idmenu)
@@ -158,65 +208,25 @@ async function migrate() {
       iduser        INT NOT NULL,
       idlokasi      INT NOT NULL,
       status        VARCHAR(20) DEFAULT 'AKTIF',
-      userentry     INT NOT NULL,
-      tglentry      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      userentry     INT NOT NULL DEFAULT 0,
       FOREIGN KEY (iduser) REFERENCES user(iduser) ON DELETE CASCADE,
       FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
       UNIQUE KEY uq_userlokasi (iduser, idlokasi)
     ) ENGINE=InnoDB
   `);
 
-  // menutemplate
+  // akun
   await connection.query(`
-    CREATE TABLE menutemplate (
-      idmenutemplate INT AUTO_INCREMENT PRIMARY KEY,
-      idtenant       INT NOT NULL,
-      namatemplate   VARCHAR(100) NOT NULL,
-      status         VARCHAR(20) DEFAULT 'AKTIF',
-      userentry      INT NOT NULL,
-      tglentry       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant)
-    ) ENGINE=InnoDB
-  `);
-
-  // menutemplatedtl
-  await connection.query(`
-    CREATE TABLE menutemplatedtl (
-      idmenutemplatedtl INT AUTO_INCREMENT PRIMARY KEY,
-      idmenutemplate   INT NOT NULL,
-      idmenu           INT NOT NULL,
-      status           VARCHAR(20) DEFAULT 'AKTIF',
-      FOREIGN KEY (idmenutemplate) REFERENCES menutemplate(idmenutemplate) ON DELETE CASCADE,
-      FOREIGN KEY (idmenu) REFERENCES menu(idmenu),
-      UNIQUE KEY uq_menutemplatedtl (idmenutemplate, idmenu)
-    ) ENGINE=InnoDB
-  `);
-
-  // ============================================================
-  // MASTER DATA TABLES (tenant-level, no idlokasi)
-  // ============================================================
-
-  // barang
-  await connection.query(`
-    CREATE TABLE barang (
-      idbarang      INT AUTO_INCREMENT PRIMARY KEY,
-      idtenant      INT NOT NULL,
-      kodebarang    VARCHAR(20) NOT NULL,
-      namabarang    VARCHAR(200) NOT NULL,
-      satuanbesar   VARCHAR(20) DEFAULT NULL,
-      satuansedang  VARCHAR(20) DEFAULT NULL,
-      satuankecil   VARCHAR(20) DEFAULT NULL,
-      konversi1     INT DEFAULT 0,
-      konversi2     INT DEFAULT 0,
-      jenis         VARCHAR(30) DEFAULT 'BAHAN JADI',
-      stokmin       INT DEFAULT 0,
-      status        VARCHAR(20) DEFAULT 'AKTIF',
-      userentry     INT NOT NULL,
-      tglentry      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CREATE TABLE akun (
+      idakun    INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant  INT NOT NULL,
+      kodeakun  VARCHAR(20) NOT NULL,
+      namaakun  VARCHAR(100) NOT NULL,
+      saldo     VARCHAR(10) DEFAULT 'DEBET',
+      status    VARCHAR(20) DEFAULT 'AKTIF',
+      userentry INT NOT NULL DEFAULT 0,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
-      FOREIGN KEY (userentry) REFERENCES user(iduser),
-      INDEX idx_barang_tenant (idtenant),
-      UNIQUE KEY uq_barang_kode (idtenant, kodebarang)
+      UNIQUE KEY uq_akun_kode (idtenant, kodeakun)
     ) ENGINE=InnoDB
   `);
 
@@ -226,15 +236,12 @@ async function migrate() {
       idcustomer    INT AUTO_INCREMENT PRIMARY KEY,
       idtenant      INT NOT NULL,
       kodecustomer  VARCHAR(20) NOT NULL,
-      namacustomer  VARCHAR(200) NOT NULL,
-      alamat        VARCHAR(500),
-      hp            VARCHAR(50),
+      namacustomer  VARCHAR(100) NOT NULL,
+      alamat        TEXT DEFAULT NULL,
+      hp            VARCHAR(20) DEFAULT NULL,
       status        VARCHAR(20) DEFAULT 'AKTIF',
-      userentry     INT NOT NULL,
-      tglentry      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      userentry     INT NOT NULL DEFAULT 0,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
-      FOREIGN KEY (userentry) REFERENCES user(iduser),
-      INDEX idx_customer_tenant (idtenant),
       UNIQUE KEY uq_customer_kode (idtenant, kodecustomer)
     ) ENGINE=InnoDB
   `);
@@ -245,284 +252,100 @@ async function migrate() {
       idsupplier    INT AUTO_INCREMENT PRIMARY KEY,
       idtenant      INT NOT NULL,
       kodesupplier  VARCHAR(20) NOT NULL,
-      namasupplier  VARCHAR(200) NOT NULL,
-      alamat        VARCHAR(500),
-      hp            VARCHAR(50),
+      namasupplier  VARCHAR(100) NOT NULL,
+      alamat        TEXT DEFAULT NULL,
+      hp            VARCHAR(20) DEFAULT NULL,
       status        VARCHAR(20) DEFAULT 'AKTIF',
-      userentry     INT NOT NULL,
-      tglentry      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      userentry     INT NOT NULL DEFAULT 0,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
-      FOREIGN KEY (userentry) REFERENCES user(iduser),
-      INDEX idx_supplier_tenant (idtenant),
       UNIQUE KEY uq_supplier_kode (idtenant, kodesupplier)
     ) ENGINE=InnoDB
   `);
 
-  // akun
+  // barang
   await connection.query(`
-    CREATE TABLE akun (
-      idakun       INT AUTO_INCREMENT PRIMARY KEY,
+    CREATE TABLE barang (
+      idbarang     INT AUTO_INCREMENT PRIMARY KEY,
       idtenant     INT NOT NULL,
-      kodeakun     VARCHAR(20) NOT NULL,
-      namaakun     VARCHAR(200) NOT NULL,
-      saldo        VARCHAR(10) NOT NULL DEFAULT 'DEBET',
+      kodebarang   VARCHAR(20) NOT NULL,
+      namabarang   VARCHAR(100) NOT NULL,
+      satuanbesar  VARCHAR(20) DEFAULT NULL,
+      satuansedang VARCHAR(20) DEFAULT NULL,
+      satuankecil  VARCHAR(20) DEFAULT NULL,
+      konversi1    INT DEFAULT 0,
+      konversi2    INT DEFAULT 0,
+      jenis        VARCHAR(30) DEFAULT 'BAHAN JADI',
+      stokmin      DECIMAL(15,3) DEFAULT 0,
       status       VARCHAR(20) DEFAULT 'AKTIF',
-      userentry    INT NOT NULL,
-      tglentry     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      userentry    INT NOT NULL DEFAULT 0,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
-      FOREIGN KEY (userentry) REFERENCES user(iduser),
-      INDEX idx_akun_tenant (idtenant),
-      UNIQUE KEY uq_akun_kode (idtenant, kodeakun)
+      UNIQUE KEY uq_barang_kode (idtenant, kodebarang),
+      INDEX idx_barang_nama (namabarang)
     ) ENGINE=InnoDB
   `);
 
   // hargabeli
   await connection.query(`
     CREATE TABLE hargabeli (
-      idhargabeli   INT AUTO_INCREMENT PRIMARY KEY,
-      idtenant      INT NOT NULL,
-      idbarang      INT NOT NULL,
-      hargabeli     DECIMAL(15,2) NOT NULL,
-      tgltrans      DATE NOT NULL,
+      idhargabeli INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant    INT NOT NULL,
+      idbarang    INT NOT NULL,
+      hargabeli   DECIMAL(15,2) NOT NULL,
+      tgltrans    DATE NOT NULL,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idbarang) REFERENCES barang(idbarang),
-      INDEX idx_hargabeli_barang (idbarang, tgltrans DESC),
-      INDEX idx_hargabeli_tenant (idtenant)
+      INDEX idx_hargabeli_barang_tgl (idbarang, tgltrans)
     ) ENGINE=InnoDB
   `);
 
   // hargajual
   await connection.query(`
     CREATE TABLE hargajual (
-      idhargajual   INT AUTO_INCREMENT PRIMARY KEY,
-      idtenant      INT NOT NULL,
-      idbarang      INT NOT NULL,
-      hargajual     DECIMAL(15,2) NOT NULL,
-      tgltrans      DATE NOT NULL,
+      idhargajual INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant    INT NOT NULL,
+      idbarang    INT NOT NULL,
+      hargajual   DECIMAL(15,2) NOT NULL,
+      tgltrans    DATE NOT NULL,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idbarang) REFERENCES barang(idbarang),
-      INDEX idx_hargajual_barang (idbarang, tgltrans DESC),
-      INDEX idx_hargajual_tenant (idtenant)
+      INDEX idx_hargajual_barang_tgl (idbarang, tgltrans)
     ) ENGINE=InnoDB
   `);
 
-  // ============================================================
-  // TRANSACTION TABLES (lokasi-level: idtenant + idlokasi)
-  // ============================================================
-
-  // jual
+  // jurnal
   await connection.query(`
-    CREATE TABLE jual (
-      idjual        INT AUTO_INCREMENT PRIMARY KEY,
-      idtenant      INT NOT NULL,
-      idlokasi      INT NOT NULL,
-      kodejual      VARCHAR(30) NOT NULL,
-      tgltrans      DATE NOT NULL,
-      idcustomer    INT DEFAULT NULL,
-      iduser        INT NOT NULL,
-      grandtotal    DECIMAL(15,2) NOT NULL DEFAULT 0,
-      bayar         DECIMAL(15,2) NOT NULL DEFAULT 0,
-      kembali       DECIMAL(15,2) NOT NULL DEFAULT 0,
-      jenis         VARCHAR(20) DEFAULT 'POS',
-      metodbayar    VARCHAR(20) DEFAULT 'TUNAI',
-      catatan       TEXT,
-      status        VARCHAR(20) DEFAULT 'AKTIF',
-      userentry     INT NOT NULL,
-      tglentry      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CREATE TABLE jurnal (
+      idjurnal    INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant    INT NOT NULL,
+      idlokasi    INT NOT NULL,
+      idtrans     INT DEFAULT NULL,
+      kodetrans   VARCHAR(30) DEFAULT NULL,
+      jenis       VARCHAR(20) DEFAULT NULL,
+      idakun      INT NOT NULL,
+      posisi      VARCHAR(10) NOT NULL,
+      amount      DECIMAL(15,2) NOT NULL,
+      status      VARCHAR(20) DEFAULT 'AKTIF',
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
-      FOREIGN KEY (idcustomer) REFERENCES customer(idcustomer),
-      FOREIGN KEY (iduser) REFERENCES user(iduser),
-      FOREIGN KEY (userentry) REFERENCES user(iduser),
-      INDEX idx_jual_tenant_lokasi (idtenant, idlokasi),
-      INDEX idx_jual_tgl (tgltrans),
-      UNIQUE KEY uq_jual_kode (idtenant, idlokasi, kodejual)
-    ) ENGINE=InnoDB
-  `);
-
-  // jualdtl
-  await connection.query(`
-    CREATE TABLE jualdtl (
-      idjualdtl     INT AUTO_INCREMENT PRIMARY KEY,
-      idjual        INT NOT NULL,
-      idtenant      INT NOT NULL,
-      idbarang      INT DEFAULT NULL,
-      jml           INT NOT NULL,
-      harga         DECIMAL(15,2) NOT NULL,
-      ppn           DECIMAL(15,2) DEFAULT 0,
-      diskon        DECIMAL(5,2) DEFAULT 0,
-      subtotal      DECIMAL(15,2) NOT NULL,
-      FOREIGN KEY (idjual) REFERENCES jual(idjual) ON DELETE CASCADE,
-      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
-      FOREIGN KEY (idbarang) REFERENCES barang(idbarang),
-      INDEX idx_jualdtl_jual (idjual)
-    ) ENGINE=InnoDB
-  `);
-
-  // beli
-  await connection.query(`
-    CREATE TABLE beli (
-      idbeli        INT AUTO_INCREMENT PRIMARY KEY,
-      idtenant      INT NOT NULL,
-      idlokasi      INT NOT NULL,
-      kodebeli      VARCHAR(30) NOT NULL,
-      tgltrans      DATE NOT NULL,
-      idsupplier    INT DEFAULT NULL,
-      iduser        INT NOT NULL,
-      grandtotal    DECIMAL(15,2) NOT NULL DEFAULT 0,
-      bayar         DECIMAL(15,2) NOT NULL DEFAULT 0,
-      status        VARCHAR(20) DEFAULT 'AKTIF',
-      userentry     INT NOT NULL,
-      tglentry      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
-      FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
-      FOREIGN KEY (idsupplier) REFERENCES supplier(idsupplier),
-      FOREIGN KEY (iduser) REFERENCES user(iduser),
-      FOREIGN KEY (userentry) REFERENCES user(iduser),
-      INDEX idx_beli_tenant_lokasi (idtenant, idlokasi),
-      INDEX idx_beli_tgl (tgltrans),
-      UNIQUE KEY uq_beli_kode (idtenant, idlokasi, kodebeli)
-    ) ENGINE=InnoDB
-  `);
-
-  // belidtl
-  await connection.query(`
-    CREATE TABLE belidtl (
-      idbelidtl     INT AUTO_INCREMENT PRIMARY KEY,
-      idbeli        INT NOT NULL,
-      idtenant      INT NOT NULL,
-      idbarang      INT DEFAULT NULL,
-      jml           INT NOT NULL,
-      harga         DECIMAL(15,2) NOT NULL,
-      ppn           DECIMAL(15,2) DEFAULT 0,
-      diskon        DECIMAL(5,2) DEFAULT 0,
-      subtotal      DECIMAL(15,2) NOT NULL,
-      satuan        VARCHAR(20) DEFAULT NULL,
-      FOREIGN KEY (idbeli) REFERENCES beli(idbeli) ON DELETE CASCADE,
-      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
-      FOREIGN KEY (idbarang) REFERENCES barang(idbarang),
-      INDEX idx_belidtl_beli (idbeli)
-    ) ENGINE=InnoDB
-  `);
-
-  // penyesuaianstok
-  await connection.query(`
-    CREATE TABLE penyesuaianstok (
-      idpenyesuaianstok  INT AUTO_INCREMENT PRIMARY KEY,
-      idtenant           INT NOT NULL,
-      idlokasi           INT NOT NULL,
-      kodepenyesuaianstok VARCHAR(30) NOT NULL,
-      tgltrans           DATE NOT NULL,
-      iduser             INT NOT NULL,
-      keterangan         TEXT,
-      status             VARCHAR(20) DEFAULT 'AKTIF',
-      userentry          INT NOT NULL,
-      tglentry           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
-      FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
-      FOREIGN KEY (iduser) REFERENCES user(iduser),
-      FOREIGN KEY (userentry) REFERENCES user(iduser),
-      INDEX idx_penyesuaianstok_tenant_lokasi (idtenant, idlokasi),
-      INDEX idx_penyesuaianstok_tgl (tgltrans),
-      UNIQUE KEY uq_penyesuaianstok_kode (idtenant, idlokasi, kodepenyesuaianstok)
-    ) ENGINE=InnoDB
-  `);
-
-  // penyesuaianstokdtl
-  await connection.query(`
-    CREATE TABLE penyesuaianstokdtl (
-      idpenyesuaianstokdtl  INT AUTO_INCREMENT PRIMARY KEY,
-      idpenyesuaianstok     INT NOT NULL,
-      idtenant              INT NOT NULL,
-      idbarang              INT DEFAULT NULL,
-      jml                   INT NOT NULL,
-      selisih               INT NOT NULL,
-      keterangan            TEXT,
-      FOREIGN KEY (idpenyesuaianstok) REFERENCES penyesuaianstok(idpenyesuaianstok) ON DELETE CASCADE,
-      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
-      FOREIGN KEY (idbarang) REFERENCES barang(idbarang),
-      INDEX idx_penyesuaianstokdtl_hdr (idpenyesuaianstok)
-    ) ENGINE=InnoDB
-  `);
-
-  // kartustok
-  await connection.query(`
-    CREATE TABLE kartustok (
-      idkartustok   INT AUTO_INCREMENT PRIMARY KEY,
-      idtenant      INT NOT NULL,
-      idlokasi      INT NOT NULL,
-      kodetrans     VARCHAR(30) NOT NULL,
-      idbarang      INT DEFAULT NULL,
-      jml           INT NOT NULL,
-      jenis         VARCHAR(1) NOT NULL,
-      tgltrans      DATE NOT NULL,
-      keterangan    TEXT,
-      idref         INT,
-      jenisref      VARCHAR(30),
-      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
-      FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
-      FOREIGN KEY (idbarang) REFERENCES barang(idbarang),
-      INDEX idx_kartustok_tenant_lokasi (idtenant, idlokasi),
-      INDEX idx_kartustok_barang (idbarang, tgltrans),
-      INDEX idx_kartustok_tgl (tgltrans)
-    ) ENGINE=InnoDB
-  `);
-
-  // saldostok
-  await connection.query(`
-    CREATE TABLE saldostok (
-      idsaldostok   INT AUTO_INCREMENT PRIMARY KEY,
-      idtenant      INT NOT NULL,
-      idlokasi      INT NOT NULL,
-      kodesaldostok VARCHAR(30) NOT NULL,
-      tgltrans      DATE NOT NULL,
-      iduser        INT NOT NULL,
-      catatan       TEXT,
-      status        VARCHAR(20) DEFAULT 'AKTIF',
-      userentry     INT NOT NULL,
-      tglentry      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
-      FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
-      FOREIGN KEY (iduser) REFERENCES user(iduser),
-      FOREIGN KEY (userentry) REFERENCES user(iduser),
-      INDEX idx_saldostok_tenant_lokasi (idtenant, idlokasi),
-      UNIQUE KEY uq_saldostok_kode (idtenant, idlokasi, kodesaldostok)
-    ) ENGINE=InnoDB
-  `);
-
-  // saldostokdtl
-  await connection.query(`
-    CREATE TABLE saldostokdtl (
-      idsaldostokdtl INT AUTO_INCREMENT PRIMARY KEY,
-      idsaldostok    INT NOT NULL,
-      idtenant       INT NOT NULL,
-      idbarang       INT DEFAULT NULL,
-      qty            INT NOT NULL,
-      FOREIGN KEY (idsaldostok) REFERENCES saldostok(idsaldostok) ON DELETE CASCADE,
-      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
-      FOREIGN KEY (idbarang) REFERENCES barang(idbarang),
-      INDEX idx_saldostokdtl_hdr (idsaldostok)
+      FOREIGN KEY (idakun) REFERENCES akun(idakun),
+      INDEX idx_jurnal_kodetrans (kodetrans),
+      INDEX idx_jurnal_tenant_lokasi (idtenant, idlokasi)
     ) ENGINE=InnoDB
   `);
 
   // kas
   await connection.query(`
     CREATE TABLE kas (
-      idkas         INT AUTO_INCREMENT PRIMARY KEY,
-      idtenant      INT NOT NULL,
-      idlokasi      INT NOT NULL,
-      kodekas       VARCHAR(30) NOT NULL,
-      tgltrans      DATE NOT NULL,
-      iduser        INT NOT NULL,
-      catatan       TEXT,
-      status        VARCHAR(20) DEFAULT 'AKTIF',
-      userentry     INT NOT NULL,
-      tglentry      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      idkas       INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant    INT NOT NULL,
+      idlokasi    INT NOT NULL,
+      kodekas     VARCHAR(30) NOT NULL,
+      tgltrans    DATE NOT NULL,
+      iduser      INT NOT NULL,
+      status      VARCHAR(20) DEFAULT 'AKTIF',
+      userentry   INT NOT NULL DEFAULT 0,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
-      FOREIGN KEY (iduser) REFERENCES user(iduser),
-      FOREIGN KEY (userentry) REFERENCES user(iduser),
-      INDEX idx_kas_tenant_lokasi (idtenant, idlokasi),
       INDEX idx_kas_tgl (tgltrans),
       UNIQUE KEY uq_kas_kode (idtenant, idlokasi, kodekas)
     ) ENGINE=InnoDB
@@ -531,150 +354,103 @@ async function migrate() {
   // kasdtl
   await connection.query(`
     CREATE TABLE kasdtl (
-      idkasdtl      INT AUTO_INCREMENT PRIMARY KEY,
-      idkas         INT NOT NULL,
-      idtenant      INT NOT NULL,
-      idakun        INT NOT NULL,
-      catatan       VARCHAR(200),
-      amount        DECIMAL(15,2) NOT NULL,
+      idkasdtl  INT AUTO_INCREMENT PRIMARY KEY,
+      idkas     INT NOT NULL,
+      idtenant  INT NOT NULL,
+      idakun    INT NOT NULL,
+      catatan   VARCHAR(255) DEFAULT NULL,
+      amount    DECIMAL(15,2) NOT NULL,
       FOREIGN KEY (idkas) REFERENCES kas(idkas) ON DELETE CASCADE,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
-      FOREIGN KEY (idakun) REFERENCES akun(idakun),
-      INDEX idx_kasdtl_kas (idkas)
+      FOREIGN KEY (idakun) REFERENCES akun(idakun)
     ) ENGINE=InnoDB
   `);
 
-  // jurnal
+  // jual
   await connection.query(`
-    CREATE TABLE jurnal (
-      idjurnal      INT AUTO_INCREMENT PRIMARY KEY,
-      idtenant      INT NOT NULL,
-      idlokasi      INT NOT NULL,
-      idtrans       INT NOT NULL,
-      kodetrans     VARCHAR(30) NOT NULL,
-      jenis         VARCHAR(20) NOT NULL,
-      idakun        INT NOT NULL,
-      posisi        VARCHAR(10) NOT NULL,
-      amount        DECIMAL(15,2) NOT NULL,
-      status        VARCHAR(20) DEFAULT 'AKTIF',
+    CREATE TABLE jual (
+      idjual      INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant    INT NOT NULL,
+      idlokasi    INT NOT NULL,
+      kodejual    VARCHAR(30) NOT NULL,
+      tgltrans    DATE NOT NULL,
+      idcustomer  INT DEFAULT NULL,
+      iduser      INT NOT NULL,
+      grandtotal  DECIMAL(15,2) DEFAULT 0,
+      bayar       DECIMAL(15,2) DEFAULT 0,
+      kembali     DECIMAL(15,2) DEFAULT 0,
+      jenis       VARCHAR(20) DEFAULT 'POS',
+      metodbayar  VARCHAR(20) DEFAULT 'TUNAI',
+      status      VARCHAR(20) DEFAULT 'AKTIF',
+      userentry   INT NOT NULL DEFAULT 0,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
-      FOREIGN KEY (idakun) REFERENCES akun(idakun),
-      INDEX idx_jurnal_tenant_lokasi (idtenant, idlokasi),
-      INDEX idx_jurnal_kodetrans (kodetrans)
+      FOREIGN KEY (idcustomer) REFERENCES customer(idcustomer),
+      UNIQUE KEY uq_jual_kode (idtenant, idlokasi, kodejual),
+      INDEX idx_jual_tgl (tgltrans),
+      INDEX idx_jual_customer (idcustomer)
     ) ENGINE=InnoDB
   `);
 
-  // closing
+  // jualdtl
   await connection.query(`
-    CREATE TABLE closing (
-      idclosing     INT AUTO_INCREMENT PRIMARY KEY,
-      idtenant      INT NOT NULL,
-      idlokasi      INT NOT NULL,
-      kodeclosing   VARCHAR(30) NOT NULL,
-      tgltrans      DATE NOT NULL,
-      periodbulan   VARCHAR(7) NOT NULL,
-      iduser        INT NOT NULL,
-      catatan       TEXT,
-      status        VARCHAR(20) DEFAULT 'AKTIF',
-      userentry     INT NOT NULL,
-      tglentry      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
-      FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
-      FOREIGN KEY (iduser) REFERENCES user(iduser),
-      FOREIGN KEY (userentry) REFERENCES user(iduser),
-      INDEX idx_closing_tenant_lokasi (idtenant, idlokasi, periodbulan),
-      UNIQUE KEY uq_closing_kode (idtenant, idlokasi, kodeclosing)
-    ) ENGINE=InnoDB
-  `);
-
-  // closingdtl
-  await connection.query(`
-    CREATE TABLE closingdtl (
-      idclosingdtl  INT AUTO_INCREMENT PRIMARY KEY,
-      idclosing     INT NOT NULL,
-      idtenant      INT NOT NULL,
-      idakun        INT NOT NULL,
-      amountdb      DECIMAL(15,2) DEFAULT 0,
-      amountcr      DECIMAL(15,2) DEFAULT 0,
-      FOREIGN KEY (idclosing) REFERENCES closing(idclosing) ON DELETE CASCADE,
-      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
-      FOREIGN KEY (idakun) REFERENCES akun(idakun),
-      INDEX idx_closingdtl_hdr (idclosing)
-    ) ENGINE=InnoDB
-  `);
-
-  // historyprogram — developer portal audit log
-  await connection.query(`
-    CREATE TABLE historyprogram (
-      idhistory     BIGINT AUTO_INCREMENT PRIMARY KEY,
-      idtenant      INT DEFAULT NULL,
-      idlokasi      INT DEFAULT NULL,
-      iduser        INT DEFAULT NULL,
-      action        VARCHAR(100) NOT NULL,
-      ref           VARCHAR(50) DEFAULT NULL,
-      detail        JSON DEFAULT NULL,
-      ip            VARCHAR(45) DEFAULT NULL,
-      useragent     VARCHAR(255) DEFAULT NULL,
-      tglentry      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      INDEX idx_history_tenant (idtenant),
-      INDEX idx_history_action (action),
-      INDEX idx_history_tgl (tglentry)
-    ) ENGINE=InnoDB
-  `);
-
-  // hitunghpp — HPP calculation header
-  await connection.query(`
-    CREATE TABLE hitunghpp (
-      idhitunghpp     INT AUTO_INCREMENT PRIMARY KEY,
-      idtenant        INT NOT NULL,
-      idlokasi        INT NOT NULL,
-      kodehitunghpp   VARCHAR(30) NOT NULL,
-      periodbulan     VARCHAR(7) NOT NULL,
-      tglawal         DATE NOT NULL,
-      tglakhir        DATE NOT NULL,
-      iduser          INT NOT NULL,
-      totalpembelian  DECIMAL(15,2) DEFAULT 0,
-      totalhppjual    DECIMAL(15,2) DEFAULT 0,
-      totalsaldoakhir DECIMAL(15,2) DEFAULT 0,
-      catatan         TEXT,
-      status          VARCHAR(20) DEFAULT 'AKTIF',
-      userentry       INT NOT NULL,
-      tglentry        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
-      FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
-      FOREIGN KEY (iduser) REFERENCES user(iduser),
-      FOREIGN KEY (userentry) REFERENCES user(iduser),
-      INDEX idx_hitunghpp_tenant_lokasi (idtenant, idlokasi, periodbulan),
-      UNIQUE KEY uq_hitunghpp_period (idtenant, idlokasi, periodbulan, status)
-    ) ENGINE=InnoDB
-  `);
-
-  // hitunghppdtl — HPP calculation detail per barang
-  await connection.query(`
-    CREATE TABLE hitunghppdtl (
-      idhitunghppdtl  INT AUTO_INCREMENT PRIMARY KEY,
-      idhitunghpp     INT NOT NULL,
-      idtenant        INT NOT NULL,
-      idbarang        INT NOT NULL,
-      saldoawal_qty       DECIMAL(15,2) DEFAULT 0,
-      saldoawal_nilai     DECIMAL(15,2) DEFAULT 0,
-      pembelian_qty       DECIMAL(15,2) DEFAULT 0,
-      pembelian_nilai     DECIMAL(15,2) DEFAULT 0,
-      total_qty           DECIMAL(15,2) DEFAULT 0,
-      total_nilai         DECIMAL(15,2) DEFAULT 0,
-      hpp_per_unit        DECIMAL(15,4) DEFAULT 0,
-      qty_jual            DECIMAL(15,2) DEFAULT 0,
-      hpp_jual            DECIMAL(15,2) DEFAULT 0,
-      qty_adjust          DECIMAL(15,2) DEFAULT 0,
-      hpp_adjust          DECIMAL(15,2) DEFAULT 0,
-      saldoakhir_qty      DECIMAL(15,2) DEFAULT 0,
-      saldoakhir_nilai    DECIMAL(15,2) DEFAULT 0,
-      FOREIGN KEY (idhitunghpp) REFERENCES hitunghpp(idhitunghpp) ON DELETE CASCADE,
+    CREATE TABLE jualdtl (
+      idjualdtl INT AUTO_INCREMENT PRIMARY KEY,
+      idjual    INT NOT NULL,
+      idtenant  INT NOT NULL,
+      idbarang  INT NOT NULL,
+      jml       DECIMAL(15,3) NOT NULL,
+      harga     DECIMAL(15,2) NOT NULL,
+      ppn       DECIMAL(15,2) DEFAULT 0,
+      diskon    DECIMAL(5,2) DEFAULT 0,
+      subtotal  DECIMAL(15,2) NOT NULL,
+      FOREIGN KEY (idjual) REFERENCES jual(idjual) ON DELETE CASCADE,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idbarang) REFERENCES barang(idbarang),
-      INDEX idx_hitunghppdtl_hdr (idhitunghpp),
-      INDEX idx_hitunghppdtl_barang (idbarang)
+      INDEX idx_jualdtl_barang (idbarang)
+    ) ENGINE=InnoDB
+  `);
+
+  // beli
+  await connection.query(`
+    CREATE TABLE beli (
+      idbeli      INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant    INT NOT NULL,
+      idlokasi    INT NOT NULL,
+      kodebeli    VARCHAR(30) NOT NULL,
+      tgltrans    DATE NOT NULL,
+      idsupplier  INT DEFAULT NULL,
+      iduser      INT NOT NULL,
+      grandtotal  DECIMAL(15,2) DEFAULT 0,
+      bayar       DECIMAL(15,2) DEFAULT 0,
+      status      VARCHAR(20) DEFAULT 'AKTIF',
+      userentry   INT NOT NULL DEFAULT 0,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
+      FOREIGN KEY (idsupplier) REFERENCES supplier(idsupplier),
+      UNIQUE KEY uq_beli_kode (idtenant, idlokasi, kodebeli),
+      INDEX idx_beli_tgl (tgltrans),
+      INDEX idx_beli_supplier (idsupplier)
+    ) ENGINE=InnoDB
+  `);
+
+  // belidtl
+  await connection.query(`
+    CREATE TABLE belidtl (
+      idbelidtl INT AUTO_INCREMENT PRIMARY KEY,
+      idbeli    INT NOT NULL,
+      idtenant  INT NOT NULL,
+      idbarang  INT NOT NULL,
+      jml       DECIMAL(15,3) NOT NULL,
+      harga     DECIMAL(15,2) NOT NULL,
+      ppn       DECIMAL(15,2) DEFAULT 0,
+      diskon    DECIMAL(5,2) DEFAULT 0,
+      subtotal  DECIMAL(15,2) NOT NULL,
+      satuan    VARCHAR(20) DEFAULT NULL,
+      FOREIGN KEY (idbeli) REFERENCES beli(idbeli) ON DELETE CASCADE,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idbarang) REFERENCES barang(idbarang),
+      INDEX idx_belidtl_barang (idbarang)
     ) ENGINE=InnoDB
   `);
 
@@ -691,18 +467,14 @@ async function migrate() {
       kodejual      VARCHAR(30) DEFAULT NULL,
       iduser        INT NOT NULL,
       total         DECIMAL(15,2) DEFAULT 0,
-      catatan       TEXT,
+      catatan       TEXT DEFAULT NULL,
       status        VARCHAR(20) DEFAULT 'AKTIF',
-      userentry     INT NOT NULL,
-      tglentry      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      userentry     INT NOT NULL DEFAULT 0,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
       FOREIGN KEY (idcustomer) REFERENCES customer(idcustomer),
-      FOREIGN KEY (iduser) REFERENCES user(iduser),
-      FOREIGN KEY (userentry) REFERENCES user(iduser),
-      INDEX idx_returjual_tenant_lokasi (idtenant, idlokasi),
-      INDEX idx_returjual_tgl (tgltrans),
-      UNIQUE KEY uq_returjual_kode (idtenant, idlokasi, kodereturjual)
+      UNIQUE KEY uq_returjual_kode (idtenant, idlokasi, kodereturjual),
+      INDEX idx_returjual_tgl (tgltrans)
     ) ENGINE=InnoDB
   `);
 
@@ -713,16 +485,260 @@ async function migrate() {
       idreturjual    INT NOT NULL,
       idtenant       INT NOT NULL,
       idbarang       INT NOT NULL,
-      jml            INT NOT NULL,
-      harga          DECIMAL(15,2) NOT NULL DEFAULT 0,
-      subtotal       DECIMAL(15,2) NOT NULL DEFAULT 0,
+      jml            DECIMAL(15,3) NOT NULL,
+      harga          DECIMAL(15,2) DEFAULT 0,
+      subtotal       DECIMAL(15,2) NOT NULL,
       tindaklanjut   VARCHAR(20) NOT NULL DEFAULT 'MASUK_STOK',
       idbarang2nd    INT DEFAULT NULL,
       FOREIGN KEY (idreturjual) REFERENCES returjual(idreturjual) ON DELETE CASCADE,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idbarang) REFERENCES barang(idbarang),
-      FOREIGN KEY (idbarang2nd) REFERENCES barang(idbarang),
-      INDEX idx_returjualdtl_hdr (idreturjual)
+      FOREIGN KEY (idbarang2nd) REFERENCES barang(idbarang)
+    ) ENGINE=InnoDB
+  `);
+
+  // kartustok
+  await connection.query(`
+    CREATE TABLE kartustok (
+      idkartustok INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant    INT NOT NULL,
+      idlokasi    INT NOT NULL,
+      kodetrans   VARCHAR(30) NOT NULL,
+      idbarang    INT NOT NULL,
+      jml         DECIMAL(15,3) NOT NULL,
+      jenis       VARCHAR(5) NOT NULL,
+      tgltrans    DATE NOT NULL,
+      keterangan  VARCHAR(200) DEFAULT NULL,
+      idref       INT DEFAULT NULL,
+      jenisref    VARCHAR(30) DEFAULT NULL,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
+      FOREIGN KEY (idbarang) REFERENCES barang(idbarang),
+      INDEX idx_kartustok_barang_tgl (idbarang, tgltrans),
+      INDEX idx_kartustok_tenant_lokasi (idtenant, idlokasi),
+      INDEX idx_kartustok_kodetrans (kodetrans)
+    ) ENGINE=InnoDB
+  `);
+
+  // penyesuaianstok
+  await connection.query(`
+    CREATE TABLE penyesuaianstok (
+      idpenyesuaianstok    INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant             INT NOT NULL,
+      idlokasi             INT NOT NULL,
+      kodepenyesuaianstok  VARCHAR(30) NOT NULL,
+      tgltrans             DATE NOT NULL,
+      iduser               INT NOT NULL,
+      keterangan           VARCHAR(255) DEFAULT NULL,
+      status               VARCHAR(20) DEFAULT 'AKTIF',
+      userentry            INT NOT NULL DEFAULT 0,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
+      UNIQUE KEY uq_penyesuaian_kode (idtenant, idlokasi, kodepenyesuaianstok)
+    ) ENGINE=InnoDB
+  `);
+
+  // penyesuaianstokdtl
+  await connection.query(`
+    CREATE TABLE penyesuaianstokdtl (
+      idpenyesuaianstokdtl INT AUTO_INCREMENT PRIMARY KEY,
+      idpenyesuaianstok    INT NOT NULL,
+      idtenant             INT NOT NULL,
+      idbarang             INT NOT NULL,
+      jml                  DECIMAL(15,3) NOT NULL,
+      selisih              DECIMAL(15,3) DEFAULT NULL,
+      keterangan           VARCHAR(255) DEFAULT NULL,
+      FOREIGN KEY (idpenyesuaianstok) REFERENCES penyesuaianstok(idpenyesuaianstok) ON DELETE CASCADE,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idbarang) REFERENCES barang(idbarang)
+    ) ENGINE=InnoDB
+  `);
+
+  // saldostok
+  await connection.query(`
+    CREATE TABLE saldostok (
+      idsaldostok   INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant      INT NOT NULL,
+      idlokasi      INT NOT NULL,
+      kodesaldostok VARCHAR(30) NOT NULL,
+      tgltrans      DATE NOT NULL,
+      iduser        INT NOT NULL,
+      catatan       VARCHAR(255) DEFAULT NULL,
+      status        VARCHAR(20) DEFAULT 'AKTIF',
+      userentry     INT NOT NULL DEFAULT 0,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
+      UNIQUE KEY uq_saldostok_kode (idtenant, idlokasi, kodesaldostok),
+      INDEX idx_saldostok_tgl (tgltrans)
+    ) ENGINE=InnoDB
+  `);
+
+  // saldostokdtl
+  await connection.query(`
+    CREATE TABLE saldostokdtl (
+      idsaldostokdtl INT AUTO_INCREMENT PRIMARY KEY,
+      idsaldostok    INT NOT NULL,
+      idtenant       INT NOT NULL,
+      idbarang       INT NOT NULL,
+      qty            DECIMAL(15,3) DEFAULT 0,
+      FOREIGN KEY (idsaldostok) REFERENCES saldostok(idsaldostok) ON DELETE CASCADE,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idbarang) REFERENCES barang(idbarang)
+    ) ENGINE=InnoDB
+  `);
+
+  // hitunghpp
+  await connection.query(`
+    CREATE TABLE hitunghpp (
+      idhitunghpp     INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant        INT NOT NULL,
+      idlokasi        INT NOT NULL,
+      kodehitunghpp   VARCHAR(30) NOT NULL,
+      periodbulan     VARCHAR(7) NOT NULL,
+      tglawal         DATE NOT NULL,
+      tglakhir        DATE NOT NULL,
+      iduser          INT NOT NULL,
+      catatan         TEXT DEFAULT NULL,
+      totalpembelian  DECIMAL(15,2) DEFAULT 0,
+      totalhppjual    DECIMAL(15,2) DEFAULT 0,
+      totalsaldoakhir DECIMAL(15,2) DEFAULT 0,
+      status          VARCHAR(20) DEFAULT 'AKTIF',
+      userentry       INT NOT NULL DEFAULT 0,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
+      INDEX idx_hitunghpp_periode (periodbulan)
+    ) ENGINE=InnoDB
+  `);
+
+  // hitunghppdtl
+  await connection.query(`
+    CREATE TABLE hitunghppdtl (
+      iddetail         INT AUTO_INCREMENT PRIMARY KEY,
+      idhitunghpp      INT NOT NULL,
+      idtenant         INT NOT NULL,
+      idbarang         INT NOT NULL,
+      saldoawal_qty    DECIMAL(15,3) DEFAULT 0,
+      saldoawal_nilai  DECIMAL(15,2) DEFAULT 0,
+      pembelian_qty    DECIMAL(15,3) DEFAULT 0,
+      pembelian_nilai  DECIMAL(15,2) DEFAULT 0,
+      total_qty        DECIMAL(15,3) DEFAULT 0,
+      total_nilai      DECIMAL(15,2) DEFAULT 0,
+      hpp_per_unit     DECIMAL(15,6) DEFAULT 0,
+      qty_jual         DECIMAL(15,3) DEFAULT 0,
+      hpp_jual         DECIMAL(15,2) DEFAULT 0,
+      qty_adjust       DECIMAL(15,3) DEFAULT 0,
+      hpp_adjust       DECIMAL(15,2) DEFAULT 0,
+      saldoakhir_qty   DECIMAL(15,3) DEFAULT 0,
+      saldoakhir_nilai DECIMAL(15,2) DEFAULT 0,
+      FOREIGN KEY (idhitunghpp) REFERENCES hitunghpp(idhitunghpp) ON DELETE CASCADE,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idbarang) REFERENCES barang(idbarang)
+    ) ENGINE=InnoDB
+  `);
+
+  // kartupiutang
+  await connection.query(`
+    CREATE TABLE kartupiutang (
+      idkartupiutang     INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant           INT NOT NULL,
+      idlokasi           INT NOT NULL,
+      idcustomer         INT DEFAULT NULL,
+      kodetrans          VARCHAR(30) NOT NULL,
+      jenis              VARCHAR(20) NOT NULL,
+      kodetransreferensi VARCHAR(30) DEFAULT NULL,
+      amount             DECIMAL(15,2) NOT NULL,
+      tgltrans           DATE NOT NULL,
+      status             VARCHAR(20) DEFAULT 'OPEN',
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
+      FOREIGN KEY (idcustomer) REFERENCES customer(idcustomer),
+      INDEX idx_kartupiutang_kodetrans (kodetrans),
+      INDEX idx_kartupiutang_customer (idcustomer, status)
+    ) ENGINE=InnoDB
+  `);
+
+  // pelunasanpiutang
+  await connection.query(`
+    CREATE TABLE pelunasanpiutang (
+      idpelunasan    INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant       INT NOT NULL,
+      idlokasi       INT NOT NULL,
+      idcustomer     INT NOT NULL,
+      kodepelunasan  VARCHAR(30) NOT NULL,
+      tgltrans       DATE NOT NULL,
+      total_amount   DECIMAL(15,2) NOT NULL,
+      metodbayar     VARCHAR(20) DEFAULT 'TUNAI',
+      catatan        TEXT,
+      userentry      INT NOT NULL DEFAULT 0,
+      tglentry       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
+      FOREIGN KEY (idcustomer) REFERENCES customer(idcustomer),
+      UNIQUE KEY uq_pelunasan_kode (idtenant, idlokasi, kodepelunasan)
+    ) ENGINE=InnoDB
+  `);
+
+  // pelunasanpiutangdtl
+  await connection.query(`
+    CREATE TABLE pelunasanpiutangdtl (
+      idpelunasandtl INT AUTO_INCREMENT PRIMARY KEY,
+      idpelunasan    INT NOT NULL,
+      kodetrans      VARCHAR(30) NOT NULL,
+      amount         DECIMAL(15,2) NOT NULL,
+      FOREIGN KEY (idpelunasan) REFERENCES pelunasanpiutang(idpelunasan) ON DELETE CASCADE
+    ) ENGINE=InnoDB
+  `);
+
+  // kartuhutang
+  await connection.query(`
+    CREATE TABLE kartuhutang (
+      idkartuhutang      INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant           INT NOT NULL,
+      idlokasi           INT NOT NULL,
+      idsupplier         INT DEFAULT NULL,
+      kodetrans          VARCHAR(30) NOT NULL,
+      jenis              VARCHAR(20) NOT NULL,
+      kodetransreferensi VARCHAR(30) DEFAULT NULL,
+      amount             DECIMAL(15,2) NOT NULL,
+      tgltrans           DATE NOT NULL,
+      status             VARCHAR(20) DEFAULT 'OPEN',
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
+      FOREIGN KEY (idsupplier) REFERENCES supplier(idsupplier),
+      INDEX idx_kartuhutang_kodetrans (kodetrans),
+      INDEX idx_kartuhutang_supplier (idsupplier, status)
+    ) ENGINE=InnoDB
+  `);
+
+  // pelunasanhutang
+  await connection.query(`
+    CREATE TABLE pelunasanhutang (
+      idpelunasan    INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant       INT NOT NULL,
+      idlokasi       INT NOT NULL,
+      idsupplier     INT NOT NULL,
+      kodepelunasan  VARCHAR(30) NOT NULL,
+      tgltrans       DATE NOT NULL,
+      total_amount   DECIMAL(15,2) NOT NULL,
+      metodbayar     VARCHAR(20) DEFAULT 'TUNAI',
+      catatan        TEXT,
+      userentry      INT NOT NULL DEFAULT 0,
+      tglentry       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
+      FOREIGN KEY (idsupplier) REFERENCES supplier(idsupplier),
+      UNIQUE KEY uq_pelunasanhutang_kode (idtenant, idlokasi, kodepelunasan)
+    ) ENGINE=InnoDB
+  `);
+
+  // pelunasanhutangdtl
+  await connection.query(`
+    CREATE TABLE pelunasanhutangdtl (
+      idpelunasandtl INT AUTO_INCREMENT PRIMARY KEY,
+      idpelunasan    INT NOT NULL,
+      kodetrans      VARCHAR(30) NOT NULL,
+      amount         DECIMAL(15,2) NOT NULL,
+      FOREIGN KEY (idpelunasan) REFERENCES pelunasanhutang(idpelunasan) ON DELETE CASCADE
     ) ENGINE=InnoDB
   `);
 
@@ -738,13 +754,11 @@ async function migrate() {
       iduser          INT NOT NULL,
       catatan         TEXT,
       status          VARCHAR(20) DEFAULT 'AKTIF',
-      userentry       INT NOT NULL,
+      userentry       INT NOT NULL DEFAULT 0,
       tglentry        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
       FOREIGN KEY (idcustomer) REFERENCES customer(idcustomer),
-      FOREIGN KEY (iduser) REFERENCES user(iduser),
-      FOREIGN KEY (userentry) REFERENCES user(iduser),
       INDEX idx_tukarbarang_tenant_lokasi (idtenant, idlokasi),
       INDEX idx_tukarbarang_tgl (tgltrans),
       UNIQUE KEY uq_tukarbarang_kode (idtenant, idlokasi, kodetukarbarang)
@@ -808,7 +822,7 @@ async function migrate() {
     [4, null, 'pembelian',           'Pembelian',           4, 'ShoppingBag',     '/pembelian'],
     [5, null, 'penjualan',           'Penjualan',           5, 'ReceiptText',     '/penjualan'],
     [6, null, 'stok',                'Stok',                6, 'Warehouse',       null],
-    [7, null, 'kas',                 'Kas',                 7, 'Coins',           '/kas'],
+    [7, null, 'keuangan',            'Keuangan',            7, 'Wallet',          null],
     [8, null, 'laporan',             'Laporan',             8, 'FileBarChart',    null],
     [9, null, 'setting',             'Setting',             9, 'Settings',        '/setting'],
   ];
@@ -825,7 +839,7 @@ async function migrate() {
     [11, 3, 'master.supplier',   'Supplier',        2, null, '/master/supplier'],
     [12, 3, 'master.customer',   'Customer',        3, null, '/master/customer'],
     [13, 3, 'master.akun',       'Akun',            4, null, '/master/akun'],
-    [14, 3, 'master.user',       'User',     5, null, '/master/user'],
+    [14, 3, 'master.user',       'User',            5, null, '/master/user'],
     [15, 3, 'master.lokasi',     'Lokasi',          6, null, '/master/lokasi'],
   ];
   for (const m of masterChildren) {
@@ -872,6 +886,19 @@ async function migrate() {
     [28, 8, 'laporan.rekapsales',      'Rekap Sales',     6, null, '/laporan/rekap-sales'],
   ];
   for (const m of laporanChildren) {
+    await connection.query(
+      'INSERT INTO menu (idmenu, idparent, kodemenu, namamenu, urutan, icon, path) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      m
+    );
+  }
+
+  // Seed menu — children: Keuangan
+  const keuanganChildren = [
+    [31, 7, 'keuangan.kas',                'Kas',                 1, null, '/kas'],
+    [32, 7, 'keuangan.pelunasanpiutang',   'Pelunasan Piutang',   2, null, '/keuangan/pelunasanpiutang'],
+    [33, 7, 'keuangan.pelunasanhutang',    'Pelunasan Hutang',    3, null, '/keuangan/pelunasanhutang'],
+  ];
+  for (const m of keuanganChildren) {
     await connection.query(
       'INSERT INTO menu (idmenu, idparent, kodemenu, namamenu, urutan, icon, path) VALUES (?, ?, ?, ?, ?, ?, ?)',
       m

@@ -1,0 +1,9 @@
+const router = require('express').Router();
+const ctrl = require('../controllers/kartuhutangController');
+const auth = require('../middleware/auth');
+
+router.get('/', auth, ctrl.getAll);
+router.get('/summary/:idsupplier', auth, ctrl.getSummary);
+router.get('/open/:idsupplier', auth, ctrl.getOpen);
+
+module.exports = router;

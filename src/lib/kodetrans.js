@@ -143,6 +143,14 @@ async function generateKodeTukarBarang(conn, idtenant, idlokasi) {
   return generateKode(conn, 'TB', idtenant, idlokasi, 'tukarbarang', 'kodetukarbarang');
 }
 
+async function generateKodePelunasanPiutang(conn, idtenant, idlokasi) {
+  return generateKode(conn, 'PP', idtenant, idlokasi, 'pelunasanpiutang', 'kodepelunasan');
+}
+
+async function generateKodePelunasanHutang(conn, idtenant, idlokasi) {
+  return generateKode(conn, 'PH', idtenant, idlokasi, 'pelunasanhutang', 'kodepelunasan');
+}
+
 module.exports = {
   generateKode,
   generateKodeJual,
@@ -155,4 +163,6 @@ module.exports = {
   generateKodeHitungHPP,
   generateKodeReturJual,
   generateKodeTukarBarang,
+  generateKodePelunasanPiutang,
+  generateKodePelunasanHutang,
 };

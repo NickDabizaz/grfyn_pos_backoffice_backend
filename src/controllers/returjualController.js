@@ -63,6 +63,13 @@ exports.create = async (req, res) => {
     await conn.query('UPDATE returjual SET total = ? WHERE idreturjual = ? AND idtenant = ?',
       [calculatedTotal, header.idreturjual, ctx.idtenant]);
 
+    if (kodejual && idcustomer) {
+      await conn.query(
+        'INSERT INTO kartupiutang (idtenant, idlokasi, idcustomer, kodetrans, jenis, kodetransreferensi, amount, tgltrans, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [ctx.idtenant, ctx.idlokasi, idcustomer, kodejual, 'RETUR', kodereturjual, -calculatedTotal, tgltrans, 'OPEN']
+      );
+    }
+
     await conn.commit();
     await logger.history('RETURJUAL_CREATE', { idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser, ref: kodereturjual, detail: { total: calculatedTotal }, req });
     res.status(201).json({ message: 'Retur berhasil dibuat', kodereturjual, idreturjual: header.idreturjual, total: calculatedTotal });
@@ -131,6 +138,11 @@ exports.cancel = async (req, res) => {
     if (retur.status === 'VOID') return res.status(400).json({ message: 'Retur sudah dibatalkan' });
 
     await conn.query('UPDATE returjual SET status = ? WHERE idreturjual = ? AND idtenant = ? AND idlokasi = ?', ['VOID', id, ctx.idtenant, ctx.idlokasi]);
+
+    await conn.query(
+      "DELETE FROM kartupiutang WHERE kodetransreferensi = ? AND idtenant = ? AND idlokasi = ? AND jenis = 'RETUR'",
+      [retur.kodereturjual, ctx.idtenant, ctx.idlokasi]
+    );
 
     const [details] = await conn.query('SELECT * FROM returjualdtl WHERE idreturjual = ? AND idtenant = ?', [id, ctx.idtenant]);
     const today = new Date().toISOString().slice(0, 10);

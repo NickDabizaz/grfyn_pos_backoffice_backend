@@ -24,6 +24,10 @@ const akunRoutes        = require('./routes/akun');
 const kasRoutes         = require('./routes/kas');
 const imporRoutes       = require('./routes/impor');
 const hitunghppRoutes   = require('./routes/hitunghpp');
+const kartupiutangRoutes = require('./routes/kartupiutang');
+const pelunasanpiutangRoutes = require('./routes/pelunasanpiutang');
+const kartuhutangRoutes = require('./routes/kartuhutang');
+const pelunasanhutangRoutes = require('./routes/pelunasanhutang');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -70,6 +74,10 @@ app.use('/api/akun', akunRoutes);
 app.use('/api/kas', kasRoutes);
 app.use('/api/impor', imporRoutes);
 app.use('/api/hitunghpp', hitunghppRoutes);
+app.use('/api/kartupiutang', kartupiutangRoutes);
+app.use('/api/pelunasanpiutang', pelunasanpiutangRoutes);
+app.use('/api/kartuhutang', kartuhutangRoutes);
+app.use('/api/pelunasanhutang', pelunasanhutangRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date() });

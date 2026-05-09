@@ -133,7 +133,7 @@ exports.pembelian = async (req, res) => {
 
     let sql = `SELECT b.*, s.namasupplier FROM beli b
       LEFT JOIN supplier s ON b.idsupplier = s.idsupplier AND s.idtenant = b.idtenant
-      WHERE 1=1`;
+      WHERE 1=1 and b.status <> 'VOID'`;
     const params = [];
     sql += ' AND b.idlokasi = ?'; params.push(ctx.idlokasi);
     if (tglwal) { sql += ' AND b.tgltrans >= ?'; params.push(tglwal); }

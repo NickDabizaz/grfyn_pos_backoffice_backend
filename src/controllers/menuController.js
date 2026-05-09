@@ -9,7 +9,7 @@ exports.myMenu = async (req, res) => {
     const [menus] = await pool.query(
       `SELECT m.* FROM menu m
        JOIN usermenu um ON m.idmenu = um.idmenu AND um.iduser = ?
-       WHERE um.status = 'AKTIF' AND m.status = 'AKTIF'
+       WHERE um.status = 'AKTIF'
        ORDER BY m.urutan ASC`,
       [iduser]
     );
