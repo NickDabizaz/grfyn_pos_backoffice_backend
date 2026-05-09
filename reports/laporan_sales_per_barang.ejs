@@ -4,7 +4,11 @@
   <meta charset="UTF-8">
   <title>Laporan Sales Per Barang</title>
   <link rel="stylesheet" href="/reports/laporan_style.css">
-  <style>@media print { .no-print { display: none; } }</style>
+  <style>
+    @media print { .no-print { display: none; } }
+    .filter-tags { margin-bottom: 8px; }
+    .filter-tags .tag { display:inline-block; background:#FAEFE5; color:#C4683D; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600; margin:2px; }
+  </style>
 </head>
 <body>
   <div class="no-print" style="text-align:right;margin-bottom:10px;">
@@ -23,6 +27,16 @@
     <span>Tanggal Cetak: <%= tglcetak %></span>
   </div>
 
+  <% if (kodelokasi || namalokasi || kodecustomer || namacustomer || statusLunas) { %>
+  <div class="filter-tags">
+    <% if (kodelokasi) { %><span class="tag">Lokasi: <%= kodelokasi %></span><% } %>
+    <% if (namalokasi) { %><span class="tag">Lokasi: <%= namalokasi %></span><% } %>
+    <% if (kodecustomer) { %><span class="tag">Customer: <%= kodecustomer %></span><% } %>
+    <% if (namacustomer) { %><span class="tag">Customer: <%= namacustomer %></span><% } %>
+    <% if (statusLunas) { %><span class="tag">Status: <%= statusLunas %></span><% } %>
+  </div>
+  <% } %>
+
   <table>
     <thead>
       <tr>
@@ -40,16 +54,16 @@
         <td class="center"><%= i + 1 %></td>
         <td><%= row.kodebarang %></td>
         <td><%= row.namabarang %></td>
-        <td class="center"><%= row.satuankecil || '-' %></td>
+        <td class="center"><%= row.satuan || '-' %></td>
         <td class="center"><%= row.total_qty %></td>
-        <td class="right">Rp <%= Number(row.total_nilai || 0).toLocaleString('id-ID') %></td>
+        <td class="right"> <%= Number(row.total_nilai || 0).toLocaleString('id-ID') %></td>
       </tr>
       <% }); %>
     </tbody>
     <tfoot>
       <tr>
         <td colspan="5">TOTAL</td>
-        <td class="right">Rp <%= Number(grandTotal).toLocaleString('id-ID') %></td>
+        <td class="right" <%= Number(grandTotal).toLocaleString('id-ID') %></td>
       </tr>
     </tfoot>
   </table>

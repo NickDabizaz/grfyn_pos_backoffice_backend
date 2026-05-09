@@ -4,7 +4,20 @@
   <meta charset="UTF-8">
   <title>Laporan Sales Transaksi</title>
   <link rel="stylesheet" href="/reports/laporan_style.css">
-  <style>@media print { .no-print { display: none; } }</style>
+  <style>
+    @media print { .no-print { display: none; } }
+    td.rs { vertical-align: top; border-right: 1px solid #D7CAC1; }
+    td.item { border-left: 1px solid #D7CAC1; }
+    .status-badge { padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
+    .status-badge.lunas { background: #DCFCE7; color: #166534; }
+    .status-badge.belum { background: #FEE2E2; color: #991B1B; }
+    .filter-tags { margin-bottom: 8px; }
+    .filter-tags .tag { display:inline-block; background:#FAEFE5; color:#C4683D; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600; margin:2px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #D7CAC1; padding: 8px; font-size: 11px; }
+    .center { text-align: center; }
+    .right { text-align: right; }
+  </style>
 </head>
 <body>
   <div class="no-print" style="text-align:right;margin-bottom:10px;">
@@ -23,42 +36,91 @@
     <span>Tanggal Cetak: <%= tglcetak %></span>
   </div>
 
+  <% if (kodelokasi || namalokasi || kodecustomer || namacustomer || statusLunas) { %>
+  <div class="filter-tags">
+    <% if (kodelokasi) { %><span class="tag">Lokasi: <%= kodelokasi %></span><% } %>
+    <% if (namalokasi) { %><span class="tag">Lokasi: <%= namalokasi %></span><% } %>
+    <% if (kodecustomer) { %><span class="tag">Customer: <%= kodecustomer %></span><% } %>
+    <% if (namacustomer) { %><span class="tag">Customer: <%= namacustomer %></span><% } %>
+    <% if (statusLunas) { %><span class="tag">Status: <%= statusLunas %></span><% } %>
+  </div>
+  <% } %>
+
   <table>
     <thead>
       <tr>
         <th class="center">No</th>
-        <th>Kode</th>
+        <th>Kode Jual</th>
         <th class="center">Tanggal</th>
+        <th>Lokasi</th>
+        <th>Kode Cust</th>
         <th>Customer</th>
-        <th>Kasir</th>
+        <th>Kode Barang</th>
+        <th>Nama Barang</th>
+        <th class="center">Qty</th>
+        <th class="center">Satuan</th>
+        <th class="right">Harga</th>
+        <th class="right">PPN</th>
+        <th class="right">Subtotal</th>
         <th class="right">Grand Total</th>
-        <th class="right">Bayar</th>
-        <th class="right">Kembali</th>
+        <th class="right">Dibayar</th>
+        <th class="right">Sisa</th>
+        <th class="center">Status</th>
+        <th class="center">Tgl Lunas</th>
       </tr>
     </thead>
     <tbody>
-      <% data.forEach(function(row, i) { %>
-      <tr>
-        <td class="center"><%= i + 1 %></td>
-        <td><%= row.kodejual %></td>
-        <td class="center"><%= row.tgltrans.toISOString ? row.tgltrans.toISOString().slice(0,10) : row.tgltrans %></td>
-        <td><%= row.namacustomer || '-' %></td>
-        <td><%= row.kasir || '-' %></td>
-        <td class="right">Rp <%= Number(row.grandtotal || 0).toLocaleString('id-ID') %></td>
-        <td class="right">Rp <%= Number(row.bayar || 0).toLocaleString('id-ID') %></td>
-        <td class="right">Rp <%= Number(row.kembali || 0).toLocaleString('id-ID') %></td>
-      </tr>
+      <% var no = 0; %>
+      <% transactions.forEach(function(trx) { %>
+        <% no++; %>
+        <% trx.items.forEach(function(item, idx) { %>
+        <tr>
+          <% if (idx === 0) { %>
+            <!-- Kolom Transaksi di-merge berdasarkan jumlah item -->
+            <td class="center rs" rowspan="<%= trx.items.length %>"><%= no %></td>
+            <td class="rs" rowspan="<%= trx.items.length %>"><%= trx.kodejual %></td>
+            <td class="center rs" rowspan="<%= trx.items.length %>">
+              <%= trx.tgltrans && trx.tgltrans.toISOString ? trx.tgltrans.toISOString().slice(0,10) : trx.tgltrans %>
+            </td>
+            <td class="rs" rowspan="<%= trx.items.length %>"><%= trx.namalokasi || '-' %></td>
+            <td class="rs" rowspan="<%= trx.items.length %>"><%= trx.kodecustomer || '-' %></td>
+            <td class="rs" rowspan="<%= trx.items.length %>"><%= trx.namacustomer || '-' %></td>
+          <% } %>
+
+          <!-- Bagian Barang (Akan berulang sesuai jumlah item) -->
+          <td class="center item"><%= item.kodebarang %></td>
+          <td class="item"><%= item.namabarang %></td>
+          <td class="center item"><%= Number(item.jml) %></td>
+          <td class="center item"><%= item.satuan || '-' %></td>
+          <td class="right item"> <%= Number(item.harga).toLocaleString('id-ID') %></td>
+          <td class="right item"> <%= Number(item.ppn).toLocaleString('id-ID') %></td>
+          <td class="right item"> <%= Number(item.subtotal).toLocaleString('id-ID') %></td>
+
+          <% if (idx === 0) { %>
+            <!-- Kolom Finansial di-merge berdasarkan jumlah item -->
+            <td class="right rs" rowspan="<%= trx.items.length %>"><%= Number(trx.grandtotal).toLocaleString('id-ID') %></td>
+            <td class="right rs" rowspan="<%= trx.items.length %>"><%= Number(trx.amount).toLocaleString('id-ID') %></td>
+            <td class="right rs" rowspan="<%= trx.items.length %>"><%= Number(trx.sisa).toLocaleString('id-ID') %></td>
+            <td class="center rs" rowspan="<%= trx.items.length %>">
+              <span class="status-badge <%= trx.statusLunas === 'LUNAS' ? 'lunas' : 'belum' %>"><%= trx.statusLunas %></span>
+            </td>
+            <td class="center rs" rowspan="<%= trx.items.length %>">
+              <%= trx.tglpelunasan && trx.tglpelunasan.toISOString ? trx.tglpelunasan.toISOString().slice(0,10) : (trx.tglpelunasan || '-') %>
+            </td>
+          <% } %>
+        </tr>
+        <% }); %>
       <% }); %>
     </tbody>
     <tfoot>
-      <tr>
-        <td colspan="5">TOTAL (<%= totalTransaksi %> Transaksi)</td>
-        <td class="right" colspan="3">Rp <%= Number(totalPenjualan).toLocaleString('id-ID') %></td>
+      <tr style="background-color: #FAEFE5; font-weight: bold;">
+        <td colspan="13">TOTAL (<%= totalTransaksi %> Transaksi)</td>
+        <td class="right" colspan="5"><%= Number(totalPenjualan).toLocaleString('id-ID') %></td>
       </tr>
     </tfoot>
   </table>
 
-  <div class="report-footer">
+  <div class="report-footer" style="margin-top: 20px; font-size: 10px; color: #666;">
     <p>&copy; <%= namatoko %> - Generated by Grfyn POS</p>
   </div>
 </body>

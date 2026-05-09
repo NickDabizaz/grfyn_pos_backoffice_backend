@@ -4,7 +4,17 @@
   <meta charset="UTF-8">
   <title>Rekap Laporan Penjualan</title>
   <link rel="stylesheet" href="/reports/laporan_style.css">
-  <style>@media print { .no-print { display: none; } }</style>
+  <style>
+    @media print { .no-print { display: none; } }
+    .status-badge.lunas { background: #DCFCE7; color: #166534; }
+    .status-badge.belum { background: #FEE2E2; color: #991B1B; }
+    .filter-tags { margin-bottom: 8px; }
+    .filter-tags .tag { display:inline-block; background:#FAEFE5; color:#C4683D; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600; margin:2px; }
+    .summary-box { display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
+    .summary-box .card { flex:1; min-width:140px; padding:12px 16px; border-radius:8px; background:#FAEFE5; border:1px solid #D7CAC1; }
+    .summary-box .card .label { font-size:10px; color:#998A76; font-weight:600; text-transform:uppercase; }
+    .summary-box .card .value { font-size:16px; font-weight:700; color:#4B3E34; margin-top:4px; }
+  </style>
 </head>
 <body>
   <div class="no-print" style="text-align:right;margin-bottom:10px;">
@@ -23,39 +33,78 @@
     <span>Tanggal Cetak: <%= tglcetak %></span>
   </div>
 
+  <% if (kodelokasi || namalokasi || kodecustomer || namacustomer || statusLunas) { %>
+  <div class="filter-tags">
+    <% if (kodelokasi) { %><span class="tag">Lokasi: <%= kodelokasi %></span><% } %>
+    <% if (namalokasi) { %><span class="tag">Lokasi: <%= namalokasi %></span><% } %>
+    <% if (kodecustomer) { %><span class="tag">Customer: <%= kodecustomer %></span><% } %>
+    <% if (namacustomer) { %><span class="tag">Customer: <%= namacustomer %></span><% } %>
+    <% if (statusLunas) { %><span class="tag">Status: <%= statusLunas %></span><% } %>
+  </div>
+  <% } %>
+
+  <div class="summary-box">
+    <div class="card">
+      <div class="label">Total Transaksi</div>
+      <div class="value"><%= totalTransaksi %> transaksi</div>
+    </div>
+    <div class="card">
+      <div class="label">Total Penjualan</div>
+      <div class="value" <%= Number(totalPenjualan).toLocaleString('id-ID') %></div>
+    </div>
+    <div class="card">
+      <div class="label">Total Lunas</div>
+      <div class="value" <%= Number(totalLunas).toLocaleString('id-ID') %></div>
+    </div>
+    <div class="card">
+      <div class="label">Total Piutang</div>
+      <div class="value" <%= Number(totalPiutang).toLocaleString('id-ID') %></div>
+    </div>
+  </div>
+
   <table>
     <thead>
       <tr>
-        <th>Keterangan</th>
-        <th class="right">Nilai</th>
+        <th class="center">No</th>
+        <th>Kode Jual</th>
+        <th class="center">Tanggal</th>
+        <th>Lokasi</th>
+        <th>Customer</th>
+        <th class="center">Item</th>
+        <th class="right">Grand Total</th>
+        <th class="right">Dibayar</th>
+        <th class="right">Sisa</th>
+        <th class="center">Status</th>
+        <th class="center">Tgl Lunas</th>
       </tr>
     </thead>
     <tbody>
+      <% data.forEach(function(row, i) { %>
       <tr>
-        <td>Total Transaksi</td>
-        <td class="right"><%= data.total_transaksi || 0 %> transaksi</td>
+        <td class="center"><%= i + 1 %></td>
+        <td><%= row.kodejual %></td>
+        <td class="center"><%= row.tgltrans && row.tgltrans.toISOString ? row.tgltrans.toISOString().slice(0,10) : row.tgltrans %></td>
+        <td><%= row.namalokasi || '-' %></td>
+        <td><%= row.namacustomer || '-' %></td>
+        <td class="center"><%= row.totalitem %></td>
+        <td class="right" <%= Number(row.grandtotal).toLocaleString('id-ID') %></td>
+        <td class="right" <%= Number(row.amount).toLocaleString('id-ID') %></td>
+        <td class="right" <%= Number(row.sisa).toLocaleString('id-ID') %></td>
+        <td class="center">
+          <span class="status-badge <%= row.statusLunas === 'LUNAS' ? 'lunas' : 'belum' %>"><%= row.statusLunas %></span>
+        </td>
+        <td class="center"><%= row.tglpelunasan && row.tglpelunasan.toISOString ? row.tglpelunasan.toISOString().slice(0,10) : (row.tglpelunasan || '-') %></td>
       </tr>
-      <tr>
-        <td>Total Penjualan</td>
-        <td class="right">Rp <%= Number(data.total_penjualan || 0).toLocaleString('id-ID') %></td>
-      </tr>
-      <tr>
-        <td>Total Tunai</td>
-        <td class="right">Rp <%= Number(data.total_tunai || 0).toLocaleString('id-ID') %></td>
-      </tr>
-      <tr>
-        <td>Total Non Tunai</td>
-        <td class="right">Rp <%= Number(data.total_nontunai || 0).toLocaleString('id-ID') %></td>
-      </tr>
-      <tr>
-        <td>Total Sudah Dibayar</td>
-        <td class="right">Rp <%= Number(data.total_sudah_dibayar || 0).toLocaleString('id-ID') %></td>
-      </tr>
-      <tr>
-        <td>Total Piutang</td>
-        <td class="right">Rp <%= Number(data.total_piutang || 0).toLocaleString('id-ID') %></td>
-      </tr>
+      <% }); %>
     </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="5">TOTAL</td>
+        <td class="center"><%= totalTransaksi %> transaksi</td>
+        <td class="right"> <%= Number(totalPenjualan).toLocaleString('id-ID') %></td>
+        <td class="right" colspan="4"></td>
+      </tr>
+    </tfoot>
   </table>
 
   <div class="report-footer">

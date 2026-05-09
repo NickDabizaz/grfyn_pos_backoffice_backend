@@ -67,7 +67,7 @@
       <div class="item-name"><%= item.namabarang %></div>
       <div class="item-detail">
         <span><%= Number(item.jml).toLocaleString('id-ID') %> <%= item.satuankecil %> x Rp <%= Number(item.harga).toLocaleString('id-ID') %></span>
-        <span>Rp <%= Number(item.subtotal).toLocaleString('id-ID') %></span>
+        <span> <%= Number(item.subtotal).toLocaleString('id-ID') %></span>
       </div>
       <% if (item.diskon > 0) { %>
       <div class="item-detail" style="color:#C4683D;">Diskon: <%= item.diskon %>%</div>
@@ -77,16 +77,16 @@
   </div>
 
   <div class="totals">
-    <div class="totals-row"><span>Subtotal</span><span>Rp <%= Number(subtotal).toLocaleString('id-ID') %></span></div>
+    <div class="totals-row"><span>Subtotal</span><span> <%= Number(subtotal).toLocaleString('id-ID') %></span></div>
     <% if (ppn > 0) { %>
-    <div class="totals-row"><span>PPN</span><span>Rp <%= Number(ppn).toLocaleString('id-ID') %></span></div>
+    <div class="totals-row"><span>PPN</span><span> <%= Number(ppn).toLocaleString('id-ID') %></span></div>
     <% } %>
     <% if (totalDiskon > 0) { %>
     <div class="totals-row"><span>Diskon</span><span>- Rp <%= Number(totalDiskon).toLocaleString('id-ID') %></span></div>
     <% } %>
-    <div class="totals-row grand"><span>TOTAL</span><span>Rp <%= Number(grandtotal).toLocaleString('id-ID') %></span></div>
-    <div class="totals-row"><span>Bayar</span><span>Rp <%= Number(bayar).toLocaleString('id-ID') %></span></div>
-    <div class="totals-row"><span>Kembali</span><span>Rp <%= Number(kembali).toLocaleString('id-ID') %></span></div>
+    <div class="totals-row grand"><span>TOTAL</span><span> <%= Number(grandtotal).toLocaleString('id-ID') %></span></div>
+    <div class="totals-row"><span>Bayar</span><span> <%= Number(bayar).toLocaleString('id-ID') %></span></div>
+    <div class="totals-row"><span>Kembali</span><span> <%= Number(kembali).toLocaleString('id-ID') %></span></div>
   </div>
 
   <div class="footer">
