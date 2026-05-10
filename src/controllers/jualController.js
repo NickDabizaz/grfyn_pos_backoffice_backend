@@ -85,8 +85,8 @@ exports.create = async (req, res) => {
     }
 
     // Catat ke kartu piutang dengan status OPEN (tunggakan customer)
-    let sql13 = 'INSERT INTO kartupiutang (idtenant, idlokasi, idcustomer, kodetrans, jenis, amount, tgltrans, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
-    await conn.query(sql13, [ctx.idtenant, ctx.idlokasi, idcustomer || null, kodejual, 'JUAL', calculatedGrandTotal, tgltrans, 'OPEN']);
+    let sql13 = 'INSERT INTO kartupiutang (idtenant, idlokasi, idcustomer, kodetrans, jenis, amount, terbayar, sisa, tgltrans, status) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)';
+    await conn.query(sql13, [ctx.idtenant, ctx.idlokasi, idcustomer || null, kodejual, 'JUAL', calculatedGrandTotal, calculatedGrandTotal, tgltrans, 'OPEN']);
 
     // Opsi pelunasan langsung: buat transaksi pelunasan piutang otomatis
     if (req.body.langsung_lunas && calculatedGrandTotal > 0 && idcustomer) {
@@ -99,13 +99,9 @@ exports.create = async (req, res) => {
       let sql15 = 'INSERT INTO pelunasanpiutangdtl (idpelunasan, kodetrans, amount) VALUES (?, ?, ?)';
       await conn.query(sql15, [idpelunasan, kodejual, calculatedGrandTotal]);
 
-      // Catat pengurangan piutang di kartupiutang (amount negatif = pelunasan)
-      let sql16 = 'INSERT INTO kartupiutang (idtenant, idlokasi, idcustomer, kodetrans, jenis, kodetransreferensi, amount, tgltrans, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
-      await conn.query(sql16, [ctx.idtenant, ctx.idlokasi, idcustomer, kodejual, 'PELUNASAN', kodepelunasan, -calculatedGrandTotal, tgltrans, 'OPEN']);
-
-      // Tandai piutang jual sebagai LUNAS
-      let sql17 = "UPDATE kartupiutang SET status = 'LUNAS' WHERE kodetrans = ? AND idtenant = ? AND idlokasi = ? AND jenis = 'JUAL'";
-      await conn.query(sql17, [kodejual, ctx.idtenant, ctx.idlokasi]);
+      // Update kartupiutang: set terbayar = amount, sisa = 0, status = LUNAS
+      let sql16 = "UPDATE kartupiutang SET terbayar = amount, sisa = 0, status = 'LUNAS' WHERE kodetrans = ? AND idtenant = ? AND idlokasi = ?";
+      await conn.query(sql16, [kodejual, ctx.idtenant, ctx.idlokasi]);
     }
 
     await conn.commit();
@@ -451,10 +447,10 @@ exports.update = async (req, res) => {
     }
 
     // Buat ulang catatan piutang
-    let sql49 = 'INSERT INTO kartupiutang (idtenant, idlokasi, idcustomer, kodetrans, jenis, amount, tgltrans, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
+    let sql49 = 'INSERT INTO kartupiutang (idtenant, idlokasi, idcustomer, kodetrans, jenis, amount, terbayar, sisa, tgltrans, status) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)';
     await conn.query(
       sql49,
-      [ctx.idtenant, ctx.idlokasi, idcustomer || null, oldJual.kodejual, 'JUAL', calculatedGrandTotal, today, 'OPEN']
+      [ctx.idtenant, ctx.idlokasi, idcustomer || null, oldJual.kodejual, 'JUAL', calculatedGrandTotal, calculatedGrandTotal, today, 'OPEN']
     );
 
     // Opsi pelunasan langsung setelah edit
@@ -473,8 +469,8 @@ exports.update = async (req, res) => {
         [idpelunasan, oldJual.kodejual, calculatedGrandTotal]
       );
 
-      // Tandai piutang jual sebagai LUNAS setelah pelunasan langsung
-      let sql52 = "UPDATE kartupiutang SET status = 'LUNAS' WHERE kodetrans = ? AND idtenant = ? AND idlokasi = ? AND jenis = 'JUAL'";
+      // Update kartupiutang: set terbayar = amount, sisa = 0, status = LUNAS
+      let sql52 = "UPDATE kartupiutang SET terbayar = amount, sisa = 0, status = 'LUNAS' WHERE kodetrans = ? AND idtenant = ? AND idlokasi = ? AND jenis = 'JUAL'";
       await conn.query(
         sql52,
         [oldJual.kodejual, ctx.idtenant, ctx.idlokasi]

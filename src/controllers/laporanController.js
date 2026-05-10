@@ -29,13 +29,13 @@ exports.salesTransaksi = async (req, res) => {
       c.kodecustomer, c.namacustomer,
       b.kodebarang, b.namabarang,
       jdtl.jml, jdtl.satuan, jdtl.harga, jdtl.ppn, jdtl.subtotal, j.grandtotal,
-      pp.tgltrans AS tglpelunasan, kp.amount, (j.grandtotal - COALESCE(kp.amount, 0)) AS sisa
+      pp.tgltrans AS tglpelunasan, kp.terbayar as amount, kp.sisa
     FROM jual j
       JOIN jualdtl jdtl ON j.idjual = jdtl.idjual AND jdtl.idtenant = j.idtenant
       JOIN lokasi l ON l.idlokasi = j.idlokasi AND l.idtenant = j.idtenant
       JOIN customer c ON c.idcustomer = j.idcustomer AND c.idtenant = j.idtenant
       JOIN barang b ON b.idbarang = jdtl.idbarang AND b.idtenant = j.idtenant
-      LEFT JOIN kartupiutang kp ON kp.kodetrans = j.kodejual AND kp.statuS = 'LUNAS'
+      LEFT JOIN kartupiutang kp ON kp.kodetrans = j.kodejual AND kp.jenis = 'JUAL'
       LEFT JOIN pelunasanpiutangdtl ppdtl ON ppdtl.kodetrans = kp.kodetrans
       LEFT JOIN pelunasanpiutang pp ON pp.idpelunasan = ppdtl.idpelunasan
     WHERE j.status = 'AKTIF'`;
@@ -62,12 +62,12 @@ exports.salesTransaksi = async (req, res) => {
     }
 
     if (statusLunas === 'lunas') {
-      sql += ' AND (j.grandtotal - COALESCE(kp.amount, 0)) = 0';
+      sql += ' AND kp.sisa <= 0';
     } else if (statusLunas === 'belum') {
-      sql += ' AND ((j.grandtotal - COALESCE(kp.amount, 0)) > 0 OR kp.amount IS NULL)';
+      sql += ' AND (kp.sisa > 0 OR kp.sisa IS NULL)';
     }
 
-    sql += ' ORDER BY j.tgltrans DESC, j.kodejual DESC, jdtl.idjualdtl ASC';
+    sql += 'GROUP BY jdtl.idbarang ORDER BY j.tgltrans DESC, j.kodejual DESC, jdtl.idjualdtl ASC';
 
     const rows = await tenantQuery(sql, params);
 
@@ -154,11 +154,11 @@ exports.salesPerCustomer = async (req, res) => {
     SELECT c.idcustomer, c.kodecustomer, c.namacustomer,
       COUNT(DISTINCT j.kodejual) as total_transaksi,
       COALESCE(SUM(j.grandtotal), 0) as total_penjualan,
-      COALESCE(SUM(CASE WHEN (j.grandtotal - COALESCE(kp.amount, 0)) <= 0 THEN j.grandtotal ELSE 0 END), 0) as total_lunas,
-      COALESCE(SUM(CASE WHEN (j.grandtotal - COALESCE(kp.amount, 0)) > 0 THEN (j.grandtotal - COALESCE(kp.amount, 0)) ELSE 0 END), 0) as total_piutang
+      COALESCE(SUM(CASE WHEN kp.sisa <= 0 OR kp.sisa IS NULL THEN j.grandtotal ELSE 0 END), 0) as total_lunas,
+      COALESCE(SUM(CASE WHEN kp.sisa > 0 THEN kp.sisa ELSE 0 END), 0) as total_piutang
     FROM customer c
       LEFT JOIN jual j ON c.idcustomer = j.idcustomer AND j.idtenant = c.idtenant AND j.status = 'AKTIF'
-      LEFT JOIN kartupiutang kp ON kp.kodetrans = j.kodejual AND kp.statuS = 'LUNAS'
+      LEFT JOIN kartupiutang kp ON kp.kodetrans = j.kodejual AND kp.jenis = 'JUAL'
     WHERE c.idtenant = ?`;
     const params = [ctx.idtenant];
 
@@ -189,9 +189,9 @@ exports.salesPerCustomer = async (req, res) => {
     }
 
     if (statusLunas === 'lunas') {
-      sql += ' AND (j.grandtotal - COALESCE(kp.amount, 0)) = 0';
+      sql += ' AND kp.sisa <= 0';
     } else if (statusLunas === 'belum') {
-      sql += ' AND ((j.grandtotal - COALESCE(kp.amount, 0)) > 0 OR kp.amount IS NULL)';
+      sql += ' AND (kp.sisa > 0 OR kp.sisa IS NULL)';
     }
 
     sql += ' GROUP BY c.idcustomer, c.kodecustomer, c.namacustomer ORDER BY total_penjualan DESC';
@@ -235,7 +235,7 @@ exports.salesPerBarang = async (req, res) => {
     FROM barang b
       LEFT JOIN jualdtl jd ON b.idbarang = jd.idbarang AND b.idtenant = jd.idtenant
       LEFT JOIN jual j ON jd.idjual = j.idjual AND j.idtenant = jd.idtenant AND j.status = 'AKTIF'
-      LEFT JOIN kartupiutang kp ON kp.kodetrans = j.kodejual AND kp.statuS = 'LUNAS'
+      LEFT JOIN kartupiutang kp ON kp.kodetrans = j.kodejual AND kp.jenis = 'JUAL'
     WHERE b.idtenant = ?`;
     const params = [ctx.idtenant];
 
@@ -272,9 +272,9 @@ exports.salesPerBarang = async (req, res) => {
     }
 
     if (statusLunas === 'lunas') {
-      sql += ' AND (j.grandtotal - COALESCE(kp.amount, 0)) = 0';
+      sql += ' AND kp.sisa <= 0';
     } else if (statusLunas === 'belum') {
-      sql += ' AND ((j.grandtotal - COALESCE(kp.amount, 0)) > 0 OR kp.amount IS NULL)';
+      sql += ' AND (kp.sisa > 0 OR kp.sisa IS NULL)';
     }
 
     sql += ' GROUP BY b.idbarang, b.kodebarang, b.namabarang, b.satuankecil ORDER BY total_nilai DESC';
@@ -354,11 +354,11 @@ exports.salesPerLokasi = async (req, res) => {
     SELECT l.idlokasi, l.kodelokasi, l.namalokasi,
       COUNT(DISTINCT j.kodejual) as total_transaksi,
       COALESCE(SUM(j.grandtotal), 0) as total_penjualan,
-      COALESCE(SUM(CASE WHEN (j.grandtotal - COALESCE(kp.amount, 0)) <= 0 THEN j.grandtotal ELSE 0 END), 0) as total_lunas,
-      COALESCE(SUM(CASE WHEN (j.grandtotal - COALESCE(kp.amount, 0)) > 0 THEN (j.grandtotal - COALESCE(kp.amount, 0)) ELSE 0 END), 0) as total_piutang
+      COALESCE(SUM(CASE WHEN kp.sisa <= 0 OR kp.sisa IS NULL THEN j.grandtotal ELSE 0 END), 0) as total_lunas,
+      COALESCE(SUM(CASE WHEN kp.sisa > 0 THEN kp.sisa ELSE 0 END), 0) as total_piutang
     FROM lokasi l
       LEFT JOIN jual j ON l.idlokasi = j.idlokasi AND j.idtenant = l.idtenant AND j.status = 'AKTIF'
-      LEFT JOIN kartupiutang kp ON kp.kodetrans = j.kodejual AND kp.statuS = 'LUNAS'
+      LEFT JOIN kartupiutang kp ON kp.kodetrans = j.kodejual AND kp.jenis = 'JUAL'
     WHERE l.idtenant = ?`;
     const params = [ctx.idtenant];
 
@@ -389,9 +389,9 @@ exports.salesPerLokasi = async (req, res) => {
     }
 
     if (statusLunas === 'lunas') {
-      sql += ' AND (j.grandtotal - COALESCE(kp.amount, 0)) = 0';
+      sql += ' AND kp.sisa <= 0';
     } else if (statusLunas === 'belum') {
-      sql += ' AND ((j.grandtotal - COALESCE(kp.amount, 0)) > 0 OR kp.amount IS NULL)';
+      sql += ' AND (kp.sisa > 0 OR kp.sisa IS NULL)';
     }
 
     sql += ' GROUP BY l.idlokasi, l.kodelokasi, l.namalokasi ORDER BY total_penjualan DESC';
@@ -703,12 +703,12 @@ exports.rekapSales = async (req, res) => {
       c.kodecustomer, c.namacustomer,
       COUNT(jdtl.idjualdtl) AS totalitem,
       j.grandtotal,
-      pp.tgltrans AS tglpelunasan, kp.amount, (j.grandtotal - COALESCE(kp.amount, 0)) AS sisa
+      pp.tgltrans AS tglpelunasan, kp.terbayar, kp.sisa
     FROM jual j
     JOIN jualdtl jdtl ON j.idjual = jdtl.idjual AND jdtl.idtenant = j.idtenant
     JOIN lokasi l ON l.idlokasi = j.idlokasi AND l.idtenant = j.idtenant
     JOIN customer c ON c.idcustomer = j.idcustomer AND c.idtenant = j.idtenant
-    LEFT JOIN kartupiutang kp ON kp.kodetrans = j.kodejual AND kp.statuS = 'LUNAS'
+    LEFT JOIN kartupiutang kp ON kp.kodetrans = j.kodejual AND kp.jenis = 'JUAL'
     LEFT JOIN pelunasanpiutangdtl ppdtl ON ppdtl.kodetrans = kp.kodetrans
     LEFT JOIN pelunasanpiutang pp ON pp.idpelunasan = ppdtl.idpelunasan
     WHERE j.status = 'AKTIF'`;
@@ -735,12 +735,12 @@ exports.rekapSales = async (req, res) => {
     }
 
     if (statusLunas === 'lunas') {
-      sql += ' AND (j.grandtotal - COALESCE(kp.amount, 0)) = 0';
+      sql += ' AND kp.sisa <= 0';
     } else if (statusLunas === 'belum') {
-      sql += ' AND ((j.grandtotal - COALESCE(kp.amount, 0)) > 0 OR kp.amount IS NULL)';
+      sql += ' AND (kp.sisa > 0 OR kp.sisa IS NULL)';
     }
 
-    sql += ' GROUP BY j.kodejual, j.tgltrans, l.namalokasi, c.kodecustomer, c.namacustomer, j.grandtotal, pp.tgltrans, kp.amount ORDER BY j.tgltrans DESC, j.kodejual DESC';
+    sql += ' GROUP BY j.kodejual, j.tgltrans, l.namalokasi, c.kodecustomer, c.namacustomer, j.grandtotal, pp.tgltrans, kp.terbayar, kp.sisa ORDER BY j.tgltrans DESC, j.kodejual DESC';
 
     const rows = await tenantQuery(sql, params);
 
