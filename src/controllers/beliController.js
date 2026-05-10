@@ -173,10 +173,11 @@ exports.getAll = async (req, res) => {
   try {
     const ctx = getTenantContext();
     const { tglwal, tglakhir, idsupplier, idlokasi, search } = req.query;
-    let sql = `SELECT b.*, DATE_FORMAT(b.tgltrans, '%Y-%m-%d') AS tgltrans, s.namasupplier, l.namalokasi
+    let sql = `SELECT b.*, DATE_FORMAT(b.tgltrans, '%Y-%m-%d') AS tgltrans, s.namasupplier, l.namalokasi, COALESCE(kh.status, 'BELUMLUNAS') as statuslunas
       FROM beli b
       LEFT JOIN supplier s ON b.idsupplier = s.idsupplier AND s.idtenant = b.idtenant
       LEFT JOIN lokasi l ON b.idlokasi = l.idlokasi AND l.idtenant = b.idtenant
+      LEFT JOIN kartuhutang kh on kh.kodetrans = b.kodebeli and kh.status = 'LUNAS' and kh.idtenant = b.idtenant
       WHERE b.idtenant = ?`;
     const params = [ctx.idtenant];
     // Query dinamis: tambahkan filter hanya jika parameter tersedia
