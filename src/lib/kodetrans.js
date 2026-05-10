@@ -1,3 +1,13 @@
+/**
+ * Library untuk generate kode transaksi dengan format: PREFIX.KODELOKASI.TGL.NOMOR
+ * Contoh: JL.A01.250510.001 (Jual lokasi A01 tanggal 10 Mei 2025 nomor 001)
+ * Menggunakan LOCK TABLES untuk mencegah race condition pada penomoran.
+ *
+ * Fungsi yang diekspor: generateKode (umum), generateKodeMaster (kode master data),
+ * generateKodeClosing, generateKodeHitungHPP, serta fungsi spesifik per jenis transaksi.
+ */
+
+// Fungsi inti: generate kode transaksi dengan format PREFIX.KODELOKASI.YYMMDD.NNN
 async function generateKode(conn, prefix, idtenant, idlokasi, table, column) {
   const now = new Date();
   const yy = String(now.getFullYear()).slice(-2);
@@ -5,20 +15,24 @@ async function generateKode(conn, prefix, idtenant, idlokasi, table, column) {
   const dd = String(now.getDate()).padStart(2, '0');
   const dateStr = `${yy}${mm}${dd}`;
 
-  const [[lokasi]] = await conn.query(
-    'SELECT kodelokasi FROM lokasi WHERE idtenant = ? AND idlokasi = ?',
+  // Ambil kode lokasi untuk digabung ke kode transaksi
+  let sql = 'SELECT kodelokasi FROM lokasi WHERE idtenant = ? AND idlokasi = ?';
+  const [[lokasi]] = await conn.query(sql,
     [idtenant, idlokasi]
   );
   const kdlok = lokasi.kodelokasi;
 
   const kodepattern = `${prefix}.${kdlok}.${dateStr}.%`;
 
-  await conn.query(`LOCK TABLES ${table} WRITE`);
+  // Lock tabel untuk mencegah duplikasi nomor oleh concurrent request
+  let sql2 = `LOCK TABLES ${table} WRITE`;
+  await conn.query(sql2);
 
   try {
-    const [[{ maxKode }]] = await conn.query(
-      `SELECT MAX(${column}) as maxKode FROM ${table}
-       WHERE idtenant = ? AND idlokasi = ? AND ${column} LIKE ?`,
+    // Cari nomor terakhir untuk prefix+kodelokasi+tanggal yang sama
+    let sql3 = `SELECT MAX(${column}) as maxKode FROM ${table}
+       WHERE idtenant = ? AND idlokasi = ? AND ${column} LIKE ?`;
+    const [[{ maxKode }]] = await conn.query(sql3,
       [idtenant, idlokasi, kodepattern]
     );
 
@@ -32,50 +46,58 @@ async function generateKode(conn, prefix, idtenant, idlokasi, table, column) {
 
     return kode;
   } finally {
-    await conn.query('UNLOCK TABLES');
+    let sql4 = 'UNLOCK TABLES';
+    await conn.query(sql4);
   }
 }
 
+// Generate kode penjualan: format JL.KODELOKASI.YYMMDD.NNN
 async function generateKodeJual(conn, idtenant, idlokasi) {
   return generateKode(conn, 'JL', idtenant, idlokasi, 'jual', 'kodejual');
 }
 
+// Generate kode pembelian: format BL.KODELOKASI.YYMMDD.NNN
 async function generateKodeBeli(conn, idtenant, idlokasi) {
   return generateKode(conn, 'BL', idtenant, idlokasi, 'beli', 'kodebeli');
 }
 
+// Generate kode penyesuaian stok: format PS.KODELOKASI.YYMMDD.NNN
 async function generateKodePenyesuaian(conn, idtenant, idlokasi) {
   return generateKode(conn, 'PS', idtenant, idlokasi, 'penyesuaianstok', 'kodepenyesuaianstok');
 }
 
+// Generate kode kas masuk/keluar: format KS.KODELOKASI.YYMMDD.NNN
 async function generateKodeKas(conn, idtenant, idlokasi) {
   return generateKode(conn, 'KS', idtenant, idlokasi, 'kas', 'kodekas');
 }
 
+// Generate kode saldo stok: format SS.KODELOKASI.YYMMDD.NNN
 async function generateKodeSaldoStok(conn, idtenant, idlokasi) {
   return generateKode(conn, 'SS', idtenant, idlokasi, 'saldostok', 'kodesaldostok');
 }
 
+// Generate kode closing: format CL.KODELOKASI.YYMM.NNN (hanya bulan-tahun, tanpa tanggal)
 async function generateKodeClosing(conn, idtenant, idlokasi) {
   const now = new Date();
   const yy = String(now.getFullYear()).slice(-2);
   const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const dateStr = `${yy}${mm}`;
+  const dateStr = `${yy}${mm}`; // Format YYMM (tanpa tanggal)
 
-  const [[lokasi]] = await conn.query(
-    'SELECT kodelokasi FROM lokasi WHERE idtenant = ? AND idlokasi = ?',
+  let sql = 'SELECT kodelokasi FROM lokasi WHERE idtenant = ? AND idlokasi = ?';
+  const [[lokasi]] = await conn.query(sql,
     [idtenant, idlokasi]
   );
   const kdlok = lokasi.kodelokasi;
 
   const kodepattern = `CL.${kdlok}.${dateStr}.%`;
 
-  await conn.query('LOCK TABLES closing WRITE');
+  let sql2 = 'LOCK TABLES closing WRITE';
+  await conn.query(sql2);
 
   try {
-    const [[{ maxKode }]] = await conn.query(
-      `SELECT MAX(kodeclosing) as maxKode FROM closing
-       WHERE idtenant = ? AND idlokasi = ? AND kodeclosing LIKE ?`,
+    let sql3 = `SELECT MAX(kodeclosing) as maxKode FROM closing
+       WHERE idtenant = ? AND idlokasi = ? AND kodeclosing LIKE ?`;
+    const [[{ maxKode }]] = await conn.query(sql3,
       [idtenant, idlokasi, kodepattern]
     );
 
@@ -87,41 +109,46 @@ async function generateKodeClosing(conn, idtenant, idlokasi) {
 
     return `CL.${kdlok}.${dateStr}.${String(num).padStart(3, '0')}`;
   } finally {
-    await conn.query('UNLOCK TABLES');
+    let sql4 = 'UNLOCK TABLES';
+    await conn.query(sql4);
   }
 }
 
+// Generate kode master data (barang, customer, supplier, dll): format PREFIXNNNN (tanpa lokasi dan tanggal)
 async function generateKodeMaster(conn, prefix, idtenant, table, column, pad = 4) {
-  const [[{ maxKode }]] = await conn.query(
-    `SELECT MAX(${column}) as maxKode FROM ${table} WHERE idtenant = ?`,
+  // Cari nilai MAX kode untuk prefix dalam tenant
+  let sql = `SELECT MAX(${column}) as maxKode FROM ${table} WHERE idtenant = ?`;
+  const [[{ maxKode }]] = await conn.query(sql,
     [idtenant]
   );
 
   let num = 1;
   if (maxKode) {
-    const numStr = maxKode.replace(`${prefix}`, '');
+    const numStr = maxKode.replace(`${prefix}`, ''); // Ambil bagian angka setelah prefix
     num = parseInt(numStr) + 1;
   }
 
-  return `${prefix}${String(num).padStart(pad, '0')}`;
+  return `${prefix}${String(num).padStart(pad, '0')}`; // Contoh: BRG0001
 }
 
+// Generate kode perhitungan HPP: format HPP.KODELOKASI.YYYYMM.NNN
 async function generateKodeHitungHPP(conn, idtenant, idlokasi, periodbulan) {
   const [yyyy, mm] = periodbulan.split('-');
   const dateStr = `${yyyy}${mm}`;
 
-  const [[lokasi]] = await conn.query(
-    'SELECT kodelokasi FROM lokasi WHERE idtenant = ? AND idlokasi = ?',
+  let sql = 'SELECT kodelokasi FROM lokasi WHERE idtenant = ? AND idlokasi = ?';
+  const [[lokasi]] = await conn.query(sql,
     [idtenant, idlokasi]
   );
   const kdlok = lokasi.kodelokasi;
   const pattern = `HPP.${kdlok}.${dateStr}.%`;
 
-  await conn.query('LOCK TABLES hitunghpp WRITE');
+  let sql2 = 'LOCK TABLES hitunghpp WRITE';
+  await conn.query(sql2);
   try {
-    const [[{ maxKode }]] = await conn.query(
-      `SELECT MAX(kodehitunghpp) as maxKode FROM hitunghpp
-       WHERE idtenant = ? AND idlokasi = ? AND kodehitunghpp LIKE ?`,
+    let sql3 = `SELECT MAX(kodehitunghpp) as maxKode FROM hitunghpp
+       WHERE idtenant = ? AND idlokasi = ? AND kodehitunghpp LIKE ?`;
+    const [[{ maxKode }]] = await conn.query(sql3,
       [idtenant, idlokasi, pattern]
     );
     let num = 1;
@@ -131,22 +158,27 @@ async function generateKodeHitungHPP(conn, idtenant, idlokasi, periodbulan) {
     }
     return `HPP.${kdlok}.${dateStr}.${String(num).padStart(3, '0')}`;
   } finally {
-    await conn.query('UNLOCK TABLES');
+    let sql4 = 'UNLOCK TABLES';
+    await conn.query(sql4);
   }
 }
 
+// Generate kode retur penjualan: format RJ.KODELOKASI.YYMMDD.NNN
 async function generateKodeReturJual(conn, idtenant, idlokasi) {
   return generateKode(conn, 'RJ', idtenant, idlokasi, 'returjual', 'kodereturjual');
 }
 
+// Generate kode tukar barang: format TB.KODELOKASI.YYMMDD.NNN
 async function generateKodeTukarBarang(conn, idtenant, idlokasi) {
   return generateKode(conn, 'TB', idtenant, idlokasi, 'tukarbarang', 'kodetukarbarang');
 }
 
+// Generate kode pelunasan piutang: format PP.KODELOKASI.YYMMDD.NNN
 async function generateKodePelunasanPiutang(conn, idtenant, idlokasi) {
   return generateKode(conn, 'PP', idtenant, idlokasi, 'pelunasanpiutang', 'kodepelunasan');
 }
 
+// Generate kode pelunasan hutang: format PH.KODELOKASI.YYMMDD.NNN
 async function generateKodePelunasanHutang(conn, idtenant, idlokasi) {
   return generateKode(conn, 'PH', idtenant, idlokasi, 'pelunasanhutang', 'kodepelunasan');
 }

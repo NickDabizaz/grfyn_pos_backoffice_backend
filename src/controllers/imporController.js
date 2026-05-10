@@ -1,7 +1,14 @@
+/**
+ * Controller untuk import/export data via CSV.
+ * Menyediakan endpoint export (barang, customer, supplier, pembelian, penjualan),
+ * import data dari CSV, dan download template CSV.
+ * Endpoint: GET /api/impor/export/*, GET /api/impor/template/*, POST /api/impor/import/*
+ */
 const { pool, getConnection, getTenantContext, tenantQuery, tenantExecute } = require('../config/db');
 const fs = require('fs');
 const logger = require('../lib/logger');
 
+// Parse konten CSV menjadi array of objects (header sebagai key)
 function parseCSV(content) {
   const lines = content.replace(/\r/g, '').split('\n').filter(l => l.trim());
   if (!lines.length) return { headers: [], rows: [] };
@@ -18,6 +25,7 @@ function parseCSV(content) {
   return { headers, rows };
 }
 
+// Generate CSV string dari headers dan rows (dengan BOM UTF-8)
 function generateCSV(headers, rows) {
   let csv = '\uFEFF';
   csv += headers.join(',') + '\n';
@@ -34,6 +42,7 @@ function generateCSV(headers, rows) {
   return csv;
 }
 
+// Kirim response CSV ke client dengan header attachment
 function sendCSV(res, filename, headers, rows) {
   const csv = generateCSV(headers, rows);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -41,14 +50,16 @@ function sendCSV(res, filename, headers, rows) {
   res.send(csv);
 }
 
+// GET /api/impor/export/barang — Export data barang ke CSV
 exports.exportBarang = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const rows = await tenantQuery(`SELECT b.kodebarang, b.namabarang, b.satuanbesar, b.satuansedang, b.satuankecil,
+    let sql = `SELECT b.kodebarang, b.namabarang, b.satuanbesar, b.satuansedang, b.satuankecil,
       b.konversi1, b.konversi2, b.jenis, b.stokmin, b.status,
       (SELECT hargabeli FROM hargabeli WHERE idbarang = b.idbarang AND idtenant = b.idtenant ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1) as hargabeli,
       (SELECT hargajual FROM hargajual WHERE idbarang = b.idbarang AND idtenant = b.idtenant ORDER BY tgltrans DESC, idhargajual DESC LIMIT 1) as hargajual
-    FROM barang b ORDER BY b.kodebarang`);
+    FROM barang b ORDER BY b.kodebarang`;
+    const rows = await tenantQuery(sql);
     sendCSV(res, 'barang.csv', ['kodebarang', 'namabarang', 'satuanbesar', 'satuansedang', 'satuankecil', 'konversi1', 'konversi2', 'jenis', 'stokmin', 'status', 'hargabeli', 'hargajual'], rows);
   } catch (err) {
     logger.error(err, { req });
@@ -56,9 +67,11 @@ exports.exportBarang = async (req, res) => {
   }
 };
 
+// GET /api/impor/export/customer — Export data customer ke CSV
 exports.exportCustomer = async (req, res) => {
   try {
-    const rows = await tenantQuery('SELECT kodecustomer, namacustomer, alamat, hp FROM customer ORDER BY idcustomer');
+    let sql = 'SELECT kodecustomer, namacustomer, alamat, hp FROM customer ORDER BY idcustomer';
+    const rows = await tenantQuery(sql);
     sendCSV(res, 'customer.csv', ['kodecustomer', 'namacustomer', 'alamat', 'hp'], rows);
   } catch (err) {
     logger.error(err, { req });
@@ -66,9 +79,11 @@ exports.exportCustomer = async (req, res) => {
   }
 };
 
+// GET /api/impor/export/supplier — Export data supplier ke CSV
 exports.exportSupplier = async (req, res) => {
   try {
-    const rows = await tenantQuery('SELECT kodesupplier, namasupplier, alamat, hp FROM supplier ORDER BY idsupplier');
+    let sql = 'SELECT kodesupplier, namasupplier, alamat, hp FROM supplier ORDER BY idsupplier';
+    const rows = await tenantQuery(sql);
     sendCSV(res, 'supplier.csv', ['kodesupplier', 'namasupplier', 'alamat', 'hp'], rows);
   } catch (err) {
     logger.error(err, { req });
@@ -76,17 +91,19 @@ exports.exportSupplier = async (req, res) => {
   }
 };
 
+// GET /api/impor/export/beli — Export data pembelian ke CSV
 exports.exportBeli = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const rows = await tenantQuery(`SELECT b.kodebeli, b.tgltrans, s.kodesupplier, s.namasupplier,
+    let sql = `SELECT b.kodebeli, b.tgltrans, s.kodesupplier, s.namasupplier,
       br.kodebarang, br.namabarang, bd.jml, bd.harga, bd.ppn, bd.diskon, bd.subtotal,
       b.grandtotal, b.bayar, b.status
     FROM belidtl bd
     JOIN beli b ON bd.idbeli = b.idbeli AND bd.idtenant = b.idtenant
     LEFT JOIN supplier s ON b.idsupplier = s.idsupplier AND s.idtenant = b.idtenant
     LEFT JOIN barang br ON bd.idbarang = br.idbarang AND br.idtenant = bd.idtenant
-    WHERE b.idlokasi = ? ORDER BY b.tgltrans DESC, b.idbeli DESC`, [ctx.idlokasi]);
+    WHERE b.idlokasi = ? ORDER BY b.tgltrans DESC, b.idbeli DESC`;
+    const rows = await tenantQuery(sql, [ctx.idlokasi]);
     sendCSV(res, 'pembelian.csv', ['kodebeli', 'tgltrans', 'kodesupplier', 'namasupplier', 'kodebarang', 'namabarang', 'jml', 'harga', 'ppn', 'diskon', 'subtotal', 'grandtotal', 'bayar', 'status'], rows);
   } catch (err) {
     logger.error(err, { req });
@@ -94,17 +111,19 @@ exports.exportBeli = async (req, res) => {
   }
 };
 
+// GET /api/impor/export/jual — Export data penjualan ke CSV
 exports.exportJual = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const rows = await tenantQuery(`SELECT j.kodejual, j.tgltrans, c.kodecustomer, c.namacustomer,
+    let sql = `SELECT j.kodejual, j.tgltrans, c.kodecustomer, c.namacustomer,
       br.kodebarang, br.namabarang, jd.jml, jd.harga, jd.ppn, jd.diskon, jd.subtotal,
       j.grandtotal, j.bayar, j.kembali, j.status
     FROM jualdtl jd
     JOIN jual j ON jd.idjual = j.idjual AND jd.idtenant = j.idtenant
     LEFT JOIN customer c ON j.idcustomer = c.idcustomer AND c.idtenant = j.idtenant
     LEFT JOIN barang br ON jd.idbarang = br.idbarang AND br.idtenant = jd.idtenant
-    WHERE j.idlokasi = ? ORDER BY j.tgltrans DESC, j.idjual DESC`, [ctx.idlokasi]);
+    WHERE j.idlokasi = ? ORDER BY j.tgltrans DESC, j.idjual DESC`;
+    const rows = await tenantQuery(sql, [ctx.idlokasi]);
     sendCSV(res, 'penjualan.csv', ['kodejual', 'tgltrans', 'kodecustomer', 'namacustomer', 'kodebarang', 'namabarang', 'jml', 'harga', 'ppn', 'diskon', 'subtotal', 'grandtotal', 'bayar', 'kembali', 'status'], rows);
   } catch (err) {
     logger.error(err, { req });
@@ -112,6 +131,7 @@ exports.exportJual = async (req, res) => {
   }
 };
 
+// POST /api/impor/import/barang — Import data barang dari file CSV
 exports.importBarang = async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'File tidak ditemukan' });
   const conn = await getConnection();
@@ -130,23 +150,29 @@ exports.importBarang = async (req, res) => {
       const r = rows[i];
       if (!r.namabarang) { errors.push({ row: i + 2, message: 'namabarang wajib diisi' }); continue; }
 
+      // Generate kode barang otomatis (BRG0001, BRG0002, ...)
       try {
-        const [[{ maxKode }]] = await conn.query('SELECT MAX(kodebarang) as maxKode FROM barang WHERE idtenant = ?', [ctx.idtenant]);
+        let sqlMaxKode = 'SELECT MAX(kodebarang) as maxKode FROM barang WHERE idtenant = ?';
+        const [[{ maxKode }]] = await conn.query(sqlMaxKode, [ctx.idtenant]);
         let num = 1;
         if (maxKode) { num = parseInt(maxKode.replace('BRG', '')) + 1; }
         const kodebarang = `BRG${String(num).padStart(4, '0')}`;
 
+        // Insert barang dan harga beli/jual jika ada
+        let sqlInsert = 'INSERT INTO barang (idtenant, kodebarang, namabarang, satuanbesar, satuansedang, satuankecil, konversi1, konversi2, jenis, stokmin, status, userentry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         const [result] = await conn.query(
-          'INSERT INTO barang (idtenant, kodebarang, namabarang, satuanbesar, satuansedang, satuankecil, konversi1, konversi2, jenis, stokmin, status, userentry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          sqlInsert,
           [ctx.idtenant, kodebarang, r.namabarang, r.satuanbesar || '', r.satuansedang || '', r.satuankecil || '', parseInt(r.konversi1) || 0, parseInt(r.konversi2) || 0, r.jenis || 'BAHAN JADI', parseInt(r.stokmin) || 0, 'AKTIF', ctx.iduser]
         );
         const idbarang = result.insertId;
 
         if (r.hargabeli && parseFloat(r.hargabeli) > 0) {
-          await conn.query('INSERT INTO hargabeli (idtenant, idbarang, hargabeli, tgltrans) VALUES (?, ?, ?, ?)', [ctx.idtenant, idbarang, parseFloat(r.hargabeli), today]);
+          let sqlHbeli = 'INSERT INTO hargabeli (idtenant, idbarang, hargabeli, tgltrans) VALUES (?, ?, ?, ?)';
+          await conn.query(sqlHbeli, [ctx.idtenant, idbarang, parseFloat(r.hargabeli), today]);
         }
         if (r.hargajual && parseFloat(r.hargajual) > 0) {
-          await conn.query('INSERT INTO hargajual (idtenant, idbarang, hargajual, tgltrans) VALUES (?, ?, ?, ?)', [ctx.idtenant, idbarang, parseFloat(r.hargajual), today]);
+          let sqlHjual = 'INSERT INTO hargajual (idtenant, idbarang, hargajual, tgltrans) VALUES (?, ?, ?, ?)';
+          await conn.query(sqlHjual, [ctx.idtenant, idbarang, parseFloat(r.hargajual), today]);
         }
         success++;
       } catch (e) {
@@ -167,6 +193,7 @@ exports.importBarang = async (req, res) => {
   }
 };
 
+// POST /api/impor/import/customer — Import data customer dari file CSV
 exports.importCustomer = async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'File tidak ditemukan' });
   const conn = await getConnection();
@@ -185,12 +212,14 @@ exports.importCustomer = async (req, res) => {
       if (!r.namacustomer) { errors.push({ row: i + 2, message: 'namacustomer wajib diisi' }); continue; }
 
       try {
-        const [[{ maxKode }]] = await conn.query('SELECT MAX(kodecustomer) as maxKode FROM customer WHERE idtenant = ?', [ctx.idtenant]);
+        let sqlMaxCust = 'SELECT MAX(kodecustomer) as maxKode FROM customer WHERE idtenant = ?';
+        const [[{ maxKode }]] = await conn.query(sqlMaxCust, [ctx.idtenant]);
         let num = 1;
         if (maxKode) { num = parseInt(maxKode.replace('CST', '')) + 1; }
         const kodecustomer = `CST${String(num).padStart(4, '0')}`;
 
-        await conn.query('INSERT INTO customer (idtenant, kodecustomer, namacustomer, alamat, hp, status, userentry) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        let sqlInsCust = 'INSERT INTO customer (idtenant, kodecustomer, namacustomer, alamat, hp, status, userentry) VALUES (?, ?, ?, ?, ?, ?, ?)';
+        await conn.query(sqlInsCust,
           [ctx.idtenant, kodecustomer, r.namacustomer, r.alamat || '', r.hp || '', 'AKTIF', ctx.iduser]);
         success++;
       } catch (e) {
@@ -211,6 +240,7 @@ exports.importCustomer = async (req, res) => {
   }
 };
 
+// POST /api/impor/import/supplier — Import data supplier dari file CSV
 exports.importSupplier = async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'File tidak ditemukan' });
   const conn = await getConnection();
@@ -229,12 +259,14 @@ exports.importSupplier = async (req, res) => {
       if (!r.namasupplier) { errors.push({ row: i + 2, message: 'namasupplier wajib diisi' }); continue; }
 
       try {
-        const [[{ maxKode }]] = await conn.query('SELECT MAX(kodesupplier) as maxKode FROM supplier WHERE idtenant = ?', [ctx.idtenant]);
+        let sqlMaxSup = 'SELECT MAX(kodesupplier) as maxKode FROM supplier WHERE idtenant = ?';
+        const [[{ maxKode }]] = await conn.query(sqlMaxSup, [ctx.idtenant]);
         let num = 1;
         if (maxKode) { num = parseInt(maxKode.replace('SUP', '')) + 1; }
         const kodesupplier = `SUP${String(num).padStart(4, '0')}`;
 
-        await conn.query('INSERT INTO supplier (idtenant, kodesupplier, namasupplier, alamat, hp, status, userentry) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        let sqlInsSup = 'INSERT INTO supplier (idtenant, kodesupplier, namasupplier, alamat, hp, status, userentry) VALUES (?, ?, ?, ?, ?, ?, ?)';
+        await conn.query(sqlInsSup,
           [ctx.idtenant, kodesupplier, r.namasupplier, r.alamat || '', r.hp || '', 'AKTIF', ctx.iduser]);
         success++;
       } catch (e) {
@@ -255,14 +287,17 @@ exports.importSupplier = async (req, res) => {
   }
 };
 
+// POST /api/impor/import/beli — Import pembelian (belum diimplementasikan)
 exports.importBeli = async (req, res) => {
   res.status(501).json({ message: 'Import pembelian akan diimplementasikan di fase berikutnya' });
 };
 
+// POST /api/impor/import/jual — Import penjualan (belum diimplementasikan)
 exports.importJual = async (req, res) => {
   res.status(501).json({ message: 'Import penjualan akan diimplementasikan di fase berikutnya' });
 };
 
+// GET /api/impor/template/barang — Download template CSV untuk import barang
 exports.templateBarang = (req, res) => {
   sendCSV(res, 'template_barang.csv',
     ['namabarang', 'satuanbesar', 'satuansedang', 'satuankecil', 'konversi1', 'konversi2', 'jenis', 'stokmin', 'hargabeli', 'hargajual'],
@@ -270,6 +305,7 @@ exports.templateBarang = (req, res) => {
   );
 };
 
+// GET /api/impor/template/customer — Download template CSV untuk import customer
 exports.templateCustomer = (req, res) => {
   sendCSV(res, 'template_customer.csv',
     ['namacustomer', 'alamat', 'hp'],
@@ -277,6 +313,7 @@ exports.templateCustomer = (req, res) => {
   );
 };
 
+// GET /api/impor/template/supplier — Download template CSV untuk import supplier
 exports.templateSupplier = (req, res) => {
   sendCSV(res, 'template_supplier.csv',
     ['namasupplier', 'alamat', 'hp'],
@@ -284,6 +321,7 @@ exports.templateSupplier = (req, res) => {
   );
 };
 
+// GET /api/impor/template/beli — Download template CSV untuk import pembelian
 exports.templateBeli = (req, res) => {
   sendCSV(res, 'template_pembelian.csv',
     ['tgltrans', 'idsupplier', 'kodebarang', 'jml', 'harga', 'ppn', 'diskon'],
@@ -291,6 +329,7 @@ exports.templateBeli = (req, res) => {
   );
 };
 
+// GET /api/impor/template/jual — Download template CSV untuk import penjualan
 exports.templateJual = (req, res) => {
   sendCSV(res, 'template_penjualan.csv',
     ['tgltrans', 'idcustomer', 'kodebarang', 'jml', 'harga', 'ppn', 'diskon'],
@@ -298,6 +337,8 @@ exports.templateJual = (req, res) => {
   );
 };
 
+// POST /api/impor/import/jual-batch — Import batch penjualan dari CSV
+// Validasi: header wajib, duplikasi kode, lookup lokasi/customer/barang, validasi perhitungan subtotal
 exports.importJualBatch = async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'File CSV wajib diupload' });
   const conn = await getConnection();
@@ -309,6 +350,7 @@ exports.importJualBatch = async (req, res) => {
 
     if (!rows.length) return res.status(400).json({ message: 'File CSV kosong' });
 
+    // Validasi header wajib ada
     const requiredHeaders = ['kodejual', 'tgltrans', 'namacustomer', 'namalokasi', 'namabarang', 'qty', 'harga', 'diskon', 'ppn', 'subtotal', 'grandtotal'];
     const firstRow = rows[0];
     const missingHeaders = requiredHeaders.filter(h => !(h in firstRow));
@@ -316,7 +358,9 @@ exports.importJualBatch = async (req, res) => {
       return res.status(400).json({ message: `Header wajib tidak ditemukan: ${missingHeaders.join(', ')}` });
     }
 
-    const [[tenant]] = await conn.query('SELECT ppn FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+    // Ambil persentase PPN dari tenant
+    let sqlPpn = 'SELECT ppn FROM tenant WHERE idtenant = ?';
+    const [[tenant]] = await conn.query(sqlPpn, [ctx.idtenant]);
     const ppnPercent = tenant ? parseFloat(tenant.ppn) : 11;
     const errors = [];
     const grouped = {};
@@ -336,26 +380,31 @@ exports.importJualBatch = async (req, res) => {
       const subtotal = parseFloat(r.subtotal);
       const grandtotal = parseFloat(r.grandtotal);
 
+      // Validasi: cek duplikasi kodejual, lookup lokasi/customer/barang, validasi qty/harga/diskon
+      let sqlDupJual = 'SELECT kodejual FROM jual WHERE kodejual = ? AND idtenant = ? AND idlokasi = ?';
       const [[dupJual]] = await conn.query(
-        'SELECT kodejual FROM jual WHERE kodejual = ? AND idtenant = ? AND idlokasi = ?',
+        sqlDupJual,
         [kodejual, ctx.idtenant, ctx.idlokasi]
       );
       if (dupJual) { errors.push(`Baris ${row}: kodejual ${kodejual} sudah terdaftar`); continue; }
 
+      let sqlLokasi = "SELECT idlokasi FROM lokasi WHERE UPPER(namalokasi) = ? AND idtenant = ?";
       const [[lokasiRow]] = await conn.query(
-        "SELECT idlokasi FROM lokasi WHERE UPPER(namalokasi) = ? AND idtenant = ?",
+        sqlLokasi,
         [namalokasi, ctx.idtenant]
       );
       if (!lokasiRow) { errors.push(`Baris ${row}: lokasi ${namalokasi} tidak ditemukan`); continue; }
 
+      let sqlCustomer = "SELECT idcustomer FROM customer WHERE UPPER(namacustomer) = ? AND idtenant = ?";
       const [[customerRow]] = await conn.query(
-        "SELECT idcustomer FROM customer WHERE UPPER(namacustomer) = ? AND idtenant = ?",
+        sqlCustomer,
         [namacustomer, ctx.idtenant]
       );
       if (!customerRow && namacustomer) { errors.push(`Baris ${row}: customer ${namacustomer} tidak ditemukan`); continue; }
 
+      let sqlBarang = "SELECT idbarang FROM barang WHERE UPPER(namabarang) = ? AND idtenant = ?";
       const [[barangRow]] = await conn.query(
-        "SELECT idbarang FROM barang WHERE UPPER(namabarang) = ? AND idtenant = ?",
+        sqlBarang,
         [namabarang, ctx.idtenant]
       );
       if (!barangRow) { errors.push(`Baris ${row}: barang ${namabarang} tidak ditemukan`); continue; }
@@ -364,6 +413,7 @@ exports.importJualBatch = async (req, res) => {
       if (isNaN(harga) || harga < 0) { errors.push(`Baris ${row}: harga tidak valid`); continue; }
       if (isNaN(diskon) || diskon < 0) { errors.push(`Baris ${row}: diskon tidak valid`); continue; }
 
+      // Validasi perhitungan subtotal: (harga * qty) - (harga * qty * diskon/100) + ppn
       const calcSubtotal = (harga * qty) - (harga * qty * diskon / 100) + ppn;
       if (Math.abs(calcSubtotal - subtotal) > 1) {
         errors.push(`Baris ${row}: subtotal di file ${subtotal} tidak cocok hitungan ${calcSubtotal.toFixed(0)}`);
@@ -376,6 +426,7 @@ exports.importJualBatch = async (req, res) => {
       grouped[kodejual].items.push({ idbarang: barangRow.idbarang, jml: qty, harga, diskon, ppn_mode: ppn > 0 ? 'INCLUDE' : 'TIDAK_PAKAI' });
     }
 
+    // Jika ada error validasi, rollback dan kembalikan pesan error
     if (errors.length > 0) {
       await conn.rollback();
       return res.status(400).json({ message: `Import gagal. Ditemukan ${errors.length} kesalahan:\n${errors.join('\n')}` });
@@ -387,63 +438,79 @@ exports.importJualBatch = async (req, res) => {
     const { generateKodeJual } = require('../lib/kodetrans');
 
     for (const [kodejual, group] of Object.entries(grouped)) {
+      // Validasi grandtotal per transaksi
       const calculatedGrandTotal = group.items.reduce((s, i) => s + (i.harga * i.jml) - (i.harga * i.jml * (i.diskon || 0) / 100) + (i.ppn_mode === 'INCLUDE' ? (i.harga * i.jml * ppnPercent) / 100 : 0), 0);
       if (Math.abs(calculatedGrandTotal - group.grandtotal) > 1) {
         await conn.rollback();
         return res.status(400).json({ message: `grandtotal untuk ${kodejual} tidak cocok` });
       }
 
+      // Insert header jual (status LUNAS, metode TUNAI)
       const effectiveKode = kodejual;
+      let sqlInsJual = 'INSERT INTO jual (idtenant, idlokasi, kodejual, tgltrans, idcustomer, iduser, grandtotal, bayar, kembali, jenis, metodbayar, status, userentry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)';
       await conn.query(
-        'INSERT INTO jual (idtenant, idlokasi, kodejual, tgltrans, idcustomer, iduser, grandtotal, bayar, kembali, jenis, metodbayar, status, userentry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)',
+        sqlInsJual,
         [ctx.idtenant, group.idlokasi, effectiveKode, group.tgltrans, group.idcustomer, ctx.iduser, calculatedGrandTotal, calculatedGrandTotal, 'JUAL', 'TUNAI', 'LUNAS', ctx.iduser]
       );
 
+      let sqlSelJual = 'SELECT idjual FROM jual WHERE kodejual = ? AND idtenant = ? AND idlokasi = ?';
       const [[header]] = await conn.query(
-        'SELECT idjual FROM jual WHERE kodejual = ? AND idtenant = ? AND idlokasi = ?',
+        sqlSelJual,
         [effectiveKode, ctx.idtenant, group.idlokasi]
       );
 
       for (const item of group.items) {
+        // Insert detail penjualan, kartu stok (jenis K), dan update harga jual jika berbeda
         const ppnAmount = item.ppn_mode === 'INCLUDE' ? (item.harga * item.jml * ppnPercent) / 100 : 0;
         const diskonAmt = item.diskon ? (item.harga * item.jml * item.diskon) / 100 : 0;
         const subtotal = (item.harga * item.jml) + ppnAmount - diskonAmt;
 
+        let sqlInsDtl = 'INSERT INTO jualdtl (idjual, idtenant, idbarang, jml, harga, ppn, diskon, subtotal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
         await conn.query(
-          'INSERT INTO jualdtl (idjual, idtenant, idbarang, jml, harga, ppn, diskon, subtotal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          sqlInsDtl,
           [header.idjual, ctx.idtenant, item.idbarang, item.jml, item.harga, ppnAmount, item.diskon || 0, subtotal]
         );
 
+        let sqlInsStok = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         await conn.query(
-          'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          sqlInsStok,
           [ctx.idtenant, group.idlokasi, effectiveKode, item.idbarang, item.jml, 'K', group.tgltrans, `Penjualan ${effectiveKode}`, header.idjual, 'jual']
         );
 
+        let sqlLatestJual = 'SELECT hargajual FROM hargajual WHERE idbarang = ? AND idtenant = ? ORDER BY tgltrans DESC, idhargajual DESC LIMIT 1';
         const [[latestJual]] = await conn.query(
-          'SELECT hargajual FROM hargajual WHERE idbarang = ? AND idtenant = ? ORDER BY tgltrans DESC, idhargajual DESC LIMIT 1',
+          sqlLatestJual,
           [item.idbarang, ctx.idtenant]
         );
         if (!latestJual || parseFloat(latestJual.hargajual) !== item.harga) {
-          await conn.query('INSERT INTO hargajual (idtenant, idbarang, hargajual, tgltrans) VALUES (?, ?, ?, ?)',
+          let sqlInsHjual = 'INSERT INTO hargajual (idtenant, idbarang, hargajual, tgltrans) VALUES (?, ?, ?, ?)';
+          await conn.query(sqlInsHjual,
             [ctx.idtenant, item.idbarang, item.harga, group.tgltrans]);
         }
 
         totalItems++;
       }
 
+      // Insert kartu piutang (status LUNAS)
+      let sqlInsPiut = 'INSERT INTO kartupiutang (idtenant, idlokasi, idcustomer, kodetrans, jenis, amount, tgltrans, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
       await conn.query(
-        'INSERT INTO kartupiutang (idtenant, idlokasi, idcustomer, kodetrans, jenis, amount, tgltrans, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        sqlInsPiut,
         [ctx.idtenant, group.idlokasi, group.idcustomer, effectiveKode, 'JUAL', calculatedGrandTotal, group.tgltrans, 'LUNAS']
       );
 
-      const [[akunKas]] = await conn.query("SELECT idakun FROM akun WHERE namaakun = 'KAS' AND idtenant = ? LIMIT 1", [ctx.idtenant]);
-      const [[akunJual]] = await conn.query("SELECT idakun FROM akun WHERE namaakun = 'PENJUALAN' AND idtenant = ? LIMIT 1", [ctx.idtenant]);
+      // Insert jurnal: DEBET KAS, KREDIT PENJUALAN
+      let sqlAkunKas = "SELECT idakun FROM akun WHERE namaakun = 'KAS' AND idtenant = ? LIMIT 1";
+      const [[akunKas]] = await conn.query(sqlAkunKas, [ctx.idtenant]);
+      let sqlAkunJual = "SELECT idakun FROM akun WHERE namaakun = 'PENJUALAN' AND idtenant = ? LIMIT 1";
+      const [[akunJual]] = await conn.query(sqlAkunJual, [ctx.idtenant]);
       if (akunKas) {
-        await conn.query('INSERT INTO jurnal (idtenant, idlokasi, idtrans, kodetrans, jenis, idakun, posisi, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        let sqlJurnalDebet = 'INSERT INTO jurnal (idtenant, idlokasi, idtrans, kodetrans, jenis, idakun, posisi, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
+        await conn.query(sqlJurnalDebet,
           [ctx.idtenant, group.idlokasi, header.idjual, effectiveKode, 'jual', akunKas.idakun, 'DEBET', calculatedGrandTotal]);
       }
       if (akunJual) {
-        await conn.query('INSERT INTO jurnal (idtenant, idlokasi, idtrans, kodetrans, jenis, idakun, posisi, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        let sqlJurnalKredit = 'INSERT INTO jurnal (idtenant, idlokasi, idtrans, kodetrans, jenis, idakun, posisi, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
+        await conn.query(sqlJurnalKredit,
           [ctx.idtenant, group.idlokasi, header.idjual, effectiveKode, 'jual', akunJual.idakun, 'KREDIT', calculatedGrandTotal]);
       }
 
@@ -466,6 +533,7 @@ exports.importJualBatch = async (req, res) => {
   }
 };
 
+// GET /api/impor/template/jual-batch — Download template CSV untuk import batch penjualan
 exports.templateJualBatch = (req, res) => {
   sendCSV(res, 'template_penjualan_batch.csv',
     ['kodejual', 'tgltrans', 'namacustomer', 'namalokasi', 'namabarang', 'qty', 'harga', 'diskon', 'ppn', 'subtotal', 'grandtotal'],

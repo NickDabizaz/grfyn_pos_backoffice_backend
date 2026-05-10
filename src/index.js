@@ -1,3 +1,11 @@
+/**
+ * Entry point aplikasi Grfyn POS Backend.
+ * - Setup Express server dengan middleware (CORS, JSON, URL-encoded)
+ * - Inisialisasi namespace tenant (cls-hooked) untuk multi-tenancy
+ * - Registrasi semua route API (auth, menu, user, master data, transaksi, laporan, dll)
+ * - Setup view engine EJS untuk render laporan HTML dan developer portal
+ * - Health check endpoint dan global error handler
+ */
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -5,6 +13,7 @@ const path = require('path');
 const { initTenantNamespace, getNamespace, TENANT_NS } = require('./config/db');
 const logger = require('./lib/logger');
 
+// Import semua route module
 const authRoutes        = require('./routes/auth');
 const menuRoutes        = require('./routes/menu');
 const userRoutes        = require('./routes/user');
@@ -32,9 +41,11 @@ const pelunasanhutangRoutes = require('./routes/pelunasanhutang');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Inisialisasi CLS namespace untuk tenant context (harus sebelum middleware)
 initTenantNamespace();
 logger.cleanOldLogs();
 
+// Middleware: setiap request berjalan dalam konteks namespace tenant
 app.use((req, res, next) => {
   const ns = getNamespace(TENANT_NS);
   ns.run(() => {
@@ -42,19 +53,23 @@ app.use((req, res, next) => {
   });
 });
 
+// Middleware standar
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// View engine EJS untuk render laporan dan developer portal
 app.set('view engine', 'ejs');
 app.set('views', [
   path.join(__dirname, '..', 'reports'),
   path.join(__dirname, 'developer', 'views')
 ]);
 
+// Static file serving
 app.use('/reports', express.static(path.join(__dirname, '..', 'reports')));
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
+// Registrasi semua route API
 app.use('/api/auth', authRoutes);
 app.use('/api/menu', menuRoutes);
 app.use('/api/user', userRoutes);
@@ -79,6 +94,7 @@ app.use('/api/pelunasanpiutang', pelunasanpiutangRoutes);
 app.use('/api/kartuhutang', kartuhutangRoutes);
 app.use('/api/pelunasanhutang', pelunasanhutangRoutes);
 
+// Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date() });
 });
@@ -88,18 +104,22 @@ if (process.env.DEVELOPER_PORTAL_ENABLED !== 'false') {
   app.use('/developer', developerRoutes);
 }
 
+// Global error handler
 app.use((err, req, res, next) => {
   logger.error(err, { req });
   res.status(500).json({ message: 'Internal Server Error' });
 });
 
+// Start server
 const server = app.listen(PORT, () => {
   console.log(`Grfyn POS Backend running on port ${PORT}`);
-  if (process.env.DEVELOPER_PORTAL_ENABLED !== 'false') {
+// Developer Portal (hanya aktif jika DEVELOPER_PORTAL_ENABLED !== 'false')
+if (process.env.DEVELOPER_PORTAL_ENABLED !== 'false') {
     console.log(`Developer Portal: http://localhost:${PORT}/developer`);
   }
 });
 
+// Handle error saat server start (misal port sudah dipakai)
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
     console.error(`Port ${PORT} is already in use. Kill the existing process or set a different PORT in .env`);

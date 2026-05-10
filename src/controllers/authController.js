@@ -1,33 +1,39 @@
+// Controller untuk otentikasi dan otorisasi.
+// Menangani login, pemilihan lokasi, registrasi tenant, profil user, dan perubahan password.
+
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { pool, getConnection, tenantQuery, tenantExecute, getTenantContext } = require('../config/db');
 require('dotenv').config();
 const logger = require('../lib/logger');
 
+// POST /auth/login — Login user; jika hanya 1 lokasi langsung dapat token, jika banyak pilih lokasi dulu
 exports.login = async (req, res) => {
   try {
     const { username, pass } = req.body;
-    const [rows] = await pool.query(
-      'SELECT u.*, t.namatenant, t.logo as tenant_logo, t.ppn FROM user u JOIN tenant t ON u.idtenant = t.idtenant WHERE u.username = ?',
-      [username]
-    );
+    let sql = 'SELECT u.*, t.namatenant, t.logo as tenant_logo, t.ppn FROM user u JOIN tenant t ON u.idtenant = t.idtenant WHERE u.username = ?';
+    const [rows] = await pool.query(sql, [username]);
+    // Validasi: cek username ada
     if (rows.length === 0) return res.status(401).json({ message: 'Username tidak ditemukan' });
 
     const user = rows[0];
+    // Validasi: verifikasi password dengan bcrypt
     const valid = await bcrypt.compare(pass, user.pass);
     if (!valid) return res.status(401).json({ message: 'Password salah' });
 
+    // Validasi: cek status user aktif
     if (user.status !== 'AKTIF') return res.status(401).json({ message: 'Akun tidak aktif' });
 
-    const [lokasi] = await pool.query(
-      `SELECT l.* FROM lokasi l
+    // Ambil daftar lokasi yang di-assign ke user
+    let sql2 = `SELECT l.* FROM lokasi l
        JOIN userlokasi ul ON l.idlokasi = ul.idlokasi AND ul.iduser = ?
-       WHERE l.idtenant = ? AND l.status = 'AKTIF' AND ul.status = 'AKTIF'`,
-      [user.iduser, user.idtenant]
-    );
+       WHERE l.idtenant = ? AND l.status = 'AKTIF' AND ul.status = 'AKTIF'`;
+    const [lokasi] = await pool.query(sql2, [user.iduser, user.idtenant]);
 
+    // Validasi: user harus punya minimal 1 lokasi
     if (lokasi.length === 0) return res.status(401).json({ message: 'Tidak ada lokasi yang di-assign' });
 
+    // Jika hanya 1 lokasi, langsung generate JWT token
     if (lokasi.length === 1) {
       const loc = lokasi[0];
       const token = jwt.sign(
@@ -37,7 +43,7 @@ exports.login = async (req, res) => {
           idlokasi    : loc.idlokasi,
           kodelokasi  : loc.kodelokasi,
           namalokasi  : loc.namalokasi,
-          tokenversion: user.tokenversion,
+          tokenversion: user.tokenversion, // Untuk invalidasi token saat password direset
         },
         process.env.JWT_SECRET,
         { expiresIn: '2h' }
@@ -55,7 +61,7 @@ exports.login = async (req, res) => {
           isowner   : user.isowner,
           namatenant: user.namatenant,
           logo      : user.tenant_logo,
-          ppn       : user.ppn,
+          ppn       : user.ppn, // Persentase PPN tenant
         },
         lokasi: {
           idlokasi  : loc.idlokasi,
@@ -66,6 +72,7 @@ exports.login = async (req, res) => {
       });
     }
 
+    // Jika banyak lokasi, kembalikan daftar lokasi untuk dipilih user
     return res.json({
       needSelectLocation: true,
       username          : user.username,
@@ -92,31 +99,31 @@ exports.login = async (req, res) => {
   }
 };
 
+// POST /auth/select-location — Memilih lokasi setelah login (jika user punya banyak lokasi)
 exports.selectLocation = async (req, res) => {
   try {
     const { username, idlokasi } = req.body;
 
-    const [users] = await pool.query(
-      'SELECT u.*, t.namatenant, t.logo as tenant_logo, t.ppn FROM user u JOIN tenant t ON u.idtenant = t.idtenant WHERE u.username = ?',
-      [username]
-    );
+    // Validasi: cek user
+    let sql = 'SELECT u.*, t.namatenant, t.logo as tenant_logo, t.ppn FROM user u JOIN tenant t ON u.idtenant = t.idtenant WHERE u.username = ?';
+    const [users] = await pool.query(sql, [username]);
     if (users.length === 0) return res.status(401).json({ message: 'Username tidak ditemukan' });
 
     const user = users[0];
+    // Validasi: cek status user
     if (user.status !== 'AKTIF') return res.status(401).json({ message: 'Akun tidak aktif' });
 
-    const [lokasiAccess] = await pool.query(
-      `SELECT 1 FROM userlokasi WHERE iduser = ? AND idlokasi = ? AND status = 'AKTIF'`,
-      [user.iduser, idlokasi]
-    );
+    // Validasi: cek user punya akses ke lokasi yang dipilih
+    let sql2 = `SELECT 1 FROM userlokasi WHERE iduser = ? AND idlokasi = ? AND status = 'AKTIF'`;
+    const [lokasiAccess] = await pool.query(sql2, [user.iduser, idlokasi]);
     if (lokasiAccess.length === 0) return res.status(403).json({ message: 'Tidak memiliki akses ke lokasi ini' });
 
-    const [[lokasi]] = await pool.query(
-      `SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ? AND status = 'AKTIF'`,
-      [idlokasi, user.idtenant]
-    );
+    // Validasi: cek lokasi valid dan aktif
+    let sql3 = `SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ? AND status = 'AKTIF'`;
+    const [[lokasi]] = await pool.query(sql3, [idlokasi, user.idtenant]);
     if (!lokasi) return res.status(404).json({ message: 'Lokasi tidak ditemukan' });
 
+    // Generate JWT token dengan idlokasi yang dipilih
     const token = jwt.sign(
       {
         iduser      : user.iduser,
@@ -155,6 +162,7 @@ exports.selectLocation = async (req, res) => {
   }
 };
 
+// POST /auth/register — Registrasi tenant baru: membuat tenant, lokasi default, user owner, dan assign semua menu + lokasi
 exports.register = async (req, res) => {
   const conn = await getConnection();
   try {
@@ -162,47 +170,48 @@ exports.register = async (req, res) => {
 
     await conn.beginTransaction();
 
-    const [tenantResult] = await conn.query(
-      `INSERT INTO tenant (namatenant, alamat, hp, email, npwp, ppn, idcurrency, status, userentry)
-       VALUES (?, ?, ?, ?, ?, ?, IFNULL(?, 1), 'AKTIF', 0)`,
-      [t.namatenant, t.alamat || null, t.hp || null, t.email || null, t.npwp || null, t.ppn || 0, t.idcurrency || 1]
-    );
+    // 1. Insert tenant
+    let sql = `INSERT INTO tenant (namatenant, alamat, hp, email, npwp, ppn, idcurrency, status, userentry)
+       VALUES (?, ?, ?, ?, ?, ?, IFNULL(?, 1), 'AKTIF', 0)`;
+    const [tenantResult] = await conn.query(sql, [t.namatenant, t.alamat || null, t.hp || null, t.email || null, t.npwp || null, t.ppn || 0, t.idcurrency || 1]);
     const idtenant = tenantResult.insertId;
 
-    const [lokasiResult] = await conn.query(
-      `INSERT INTO lokasi (idtenant, kodelokasi, namalokasi, alamat, hp, isdefault, status, userentry)
-       VALUES (?, ?, ?, ?, ?, 1, 'AKTIF', 0)`,
-      [idtenant, l.kodelokasi, l.namalokasi, l.alamat || null, l.hp || null]
-    );
+    // 2. Insert lokasi default (isdefault=1)
+    let sql2 = `INSERT INTO lokasi (idtenant, kodelokasi, namalokasi, alamat, hp, isdefault, status, userentry)
+       VALUES (?, ?, ?, ?, ?, 1, 'AKTIF', 0)`;
+    const [lokasiResult] = await conn.query(sql2, [idtenant, l.kodelokasi, l.namalokasi, l.alamat || null, l.hp || null]);
     const idlokasi = lokasiResult.insertId;
 
+    // 3. Insert user owner (isowner=1) — password di-hash dengan bcrypt 10 salt rounds
     const hash = await bcrypt.hash(u.pass, 10);
-    const [userResult] = await conn.query(
-      `INSERT INTO user (idtenant, username, pass, namauser, email, hp, isowner, tokenversion, status, userentry)
-       VALUES (?, ?, ?, ?, ?, ?, 1, 1, 'AKTIF', 0)`,
-      [idtenant, u.username, hash, u.namauser, u.email || null, u.hp || null]
-    );
+    let sql3 = `INSERT INTO user (idtenant, username, pass, namauser, email, hp, isowner, tokenversion, status, userentry)
+       VALUES (?, ?, ?, ?, ?, ?, 1, 1, 'AKTIF', 0)`;
+    const [userResult] = await conn.query(sql3, [idtenant, u.username, hash, u.namauser, u.email || null, u.hp || null]);
     const iduser = userResult.insertId;
 
-    await conn.query('UPDATE tenant SET userentry = ? WHERE idtenant = ?', [iduser, idtenant]);
-    await conn.query('UPDATE lokasi SET userentry = ? WHERE idlokasi = ?', [iduser, idlokasi]);
-    await conn.query('UPDATE user SET userentry = ? WHERE iduser = ?', [iduser, iduser]);
+    // 4. Update userentry di semua record ke iduser owner
+    let sql4 = 'UPDATE tenant SET userentry = ? WHERE idtenant = ?';
+    await conn.query(sql4, [iduser, idtenant]);
+    let sql5 = 'UPDATE lokasi SET userentry = ? WHERE idlokasi = ?';
+    await conn.query(sql5, [iduser, idlokasi]);
+    let sql6 = 'UPDATE user SET userentry = ? WHERE iduser = ?';
+    await conn.query(sql6, [iduser, iduser]);
 
-    const [allMenus] = await conn.query('SELECT idmenu FROM menu');
+    // 5. Assign semua menu ke user owner
+    let sql7 = 'SELECT idmenu FROM menu';
+    const [allMenus] = await conn.query(sql7);
     for (const m of allMenus) {
-      await conn.query(
-        `INSERT INTO usermenu (iduser, idmenu, status, userentry) VALUES (?, ?, 'AKTIF', ?)`,
-        [iduser, m.idmenu, iduser]
-      );
+      let sql8 = `INSERT INTO usermenu (iduser, idmenu, status, userentry) VALUES (?, ?, 'AKTIF', ?)`;
+      await conn.query(sql8, [iduser, m.idmenu, iduser]);
     }
 
-    await conn.query(
-      `INSERT INTO userlokasi (iduser, idlokasi, status, userentry) VALUES (?, ?, 'AKTIF', ?)`,
-      [iduser, idlokasi, iduser]
-    );
+    // 6. Assign lokasi default ke user owner
+    let sql9 = `INSERT INTO userlokasi (iduser, idlokasi, status, userentry) VALUES (?, ?, 'AKTIF', ?)`;
+    await conn.query(sql9, [iduser, idlokasi, iduser]);
 
     await conn.commit();
 
+    // Generate JWT langsung setelah registrasi (auto-login)
     const token = jwt.sign(
       {
         iduser,
@@ -237,6 +246,7 @@ exports.register = async (req, res) => {
     });
   } catch (err) {
     await conn.rollback();
+    // Validasi: username atau kodelokasi duplikat
     if (err.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ message: 'Username atau kodelokasi sudah digunakan' });
     }
@@ -247,19 +257,18 @@ exports.register = async (req, res) => {
   }
 };
 
+// GET /auth/me — Menampilkan profil user yang sedang login (dari token JWT)
 exports.me = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const [rows] = await pool.query(
-      `SELECT u.iduser, u.username, u.email, u.namauser, u.hp, u.isowner,
+    let sql = `SELECT u.iduser, u.username, u.email, u.namauser, u.hp, u.isowner,
               t.namatenant, t.alamat as tenant_alamat, t.hp as tenant_hp, t.logo, t.ppn,
               l.kodelokasi, l.namalokasi, l.alamat as lokasi_alamat
        FROM user u
        JOIN tenant t ON u.idtenant = t.idtenant
        JOIN lokasi l ON l.idlokasi = ? AND l.idtenant = u.idtenant
-       WHERE u.iduser = ? AND u.idtenant = ?`,
-      [ctx.idlokasi, ctx.iduser, ctx.idtenant]
-    );
+       WHERE u.iduser = ? AND u.idtenant = ?`;
+    const [rows] = await pool.query(sql, [ctx.idlokasi, ctx.iduser, ctx.idtenant]);
     if (rows.length === 0) return res.status(404).json({ message: 'User tidak ditemukan' });
     res.json(rows[0]);
   } catch (err) {
@@ -268,23 +277,22 @@ exports.me = async (req, res) => {
   }
 };
 
+// PUT /auth/change-password — Mengubah password user yang sedang login; tokenversion di-increment untuk invalidasi token lama
 exports.changePassword = async (req, res) => {
   try {
     const ctx = getTenantContext();
     const { oldPass, newPass } = req.body;
 
-    const [rows] = await pool.query(
-      'SELECT pass FROM user WHERE iduser = ? AND idtenant = ?',
-      [ctx.iduser, ctx.idtenant]
-    );
+    // Validasi: verifikasi password lama
+    let sql = 'SELECT pass FROM user WHERE iduser = ? AND idtenant = ?';
+    const [rows] = await pool.query(sql, [ctx.iduser, ctx.idtenant]);
     const valid = await bcrypt.compare(oldPass, rows[0].pass);
     if (!valid) return res.status(400).json({ message: 'Password lama salah' });
 
+    // Hash password baru dan increment tokenversion untuk logout semua sesi
     const hash = await bcrypt.hash(newPass, 10);
-    await pool.query(
-      'UPDATE user SET pass = ?, tokenversion = tokenversion + 1 WHERE iduser = ? AND idtenant = ?',
-      [hash, ctx.iduser, ctx.idtenant]
-    );
+    let sql2 = 'UPDATE user SET pass = ?, tokenversion = tokenversion + 1 WHERE iduser = ? AND idtenant = ?';
+    await pool.query(sql2, [hash, ctx.iduser, ctx.idtenant]);
 
     res.json({ message: 'Password berhasil diubah. Silakan login ulang.' });
   } catch (err) {

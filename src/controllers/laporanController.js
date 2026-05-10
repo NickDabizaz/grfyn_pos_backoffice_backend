@@ -1,6 +1,13 @@
+/**
+ * Controller untuk berbagai laporan: penjualan (transaksi, per customer, per barang, per lokasi, rekap),
+ * pembelian (transaksi, per supplier, per lokasi, per barang, rekap), stok, kartu stok, struk, dan faktur.
+ * Mendukung output format JSON (default) dan HTML (render EJS).
+ * Endpoint: GET /api/laporan/*
+ */
 const { tenantQuery, getTenantContext, pool } = require('../config/db');
 const logger = require('../lib/logger');
 
+// Helper: membuat klausa LIKE multi-value untuk filter (misal "A,B,C" -> kodelokasi LIKE '%A%' OR kodelokasi LIKE '%B%')
 function multiLike(column, raw) {
   const vals = raw.split(',').map(s => s.trim()).filter(Boolean);
   if (!vals.length) return { clause: '', params: [] };
@@ -10,6 +17,7 @@ function multiLike(column, raw) {
 
 
 
+// GET /api/laporan/sales-transaksi — Laporan detail transaksi penjualan (per item)
 exports.salesTransaksi = async (req, res) => {
   try {
     const ctx = getTenantContext();
@@ -63,6 +71,7 @@ exports.salesTransaksi = async (req, res) => {
 
     const rows = await tenantQuery(sql, params);
 
+    // Grouping: menggabungkan item per kodejual ke dalam satu transaksi
     const transactions = [];
     let currentKode = null;
     let currentGroup = null;
@@ -102,9 +111,12 @@ exports.salesTransaksi = async (req, res) => {
     const totalTransaksi = seenKodejual.size;
     const totalPenjualan = transactions.reduce((sum, t) => sum + t.grandtotal, 0);
 
+    // Render HTML jika format=html diminta
     if (format === 'html') {
-      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
-      const [[lokasi]] = await pool.query('SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?', [ctx.idlokasi, ctx.idtenant]);
+      let sqlTenant = 'SELECT * FROM tenant WHERE idtenant = ?';
+      const [[tenant]] = await pool.query(sqlTenant, [ctx.idtenant]);
+      let sqlLokasi = 'SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?';
+      const [[lokasi]] = await pool.query(sqlLokasi, [ctx.idlokasi, ctx.idtenant]);
       return res.render('laporan_sales_transaksi', {
         transactions,
         totalTransaksi,
@@ -131,6 +143,7 @@ exports.salesTransaksi = async (req, res) => {
   }
 };
 
+// GET /api/laporan/sales-per-customer — Laporan penjualan dikelompokkan per customer
 exports.salesPerCustomer = async (req, res) => {
   try {
     const ctx = getTenantContext();
@@ -187,7 +200,8 @@ exports.salesPerCustomer = async (req, res) => {
     const grandTotal = rows.reduce((sum, r) => sum + parseFloat(r.total_penjualan || 0), 0);
 
     if (format === 'html') {
-      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      let sqlTenant2 = 'SELECT * FROM tenant WHERE idtenant = ?';
+      const [[tenant]] = await pool.query(sqlTenant2, [ctx.idtenant]);
       return res.render('laporan_sales_per_customer', {
         data        : rows,                              grandTotal,
         tglwal      : tglwal || '-',                     tglakhir    : tglakhir || '-',
@@ -207,6 +221,7 @@ exports.salesPerCustomer = async (req, res) => {
   }
 };
 
+// GET /api/laporan/sales-per-barang — Laporan penjualan dikelompokkan per barang
 exports.salesPerBarang = async (req, res) => {
   try {
     const ctx = getTenantContext();
@@ -268,7 +283,8 @@ exports.salesPerBarang = async (req, res) => {
     const grandTotal = rows.reduce((sum, r) => sum + parseFloat(r.total_nilai || 0), 0);
 
     if (format === 'html') {
-      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      let sqlTenant3 = 'SELECT * FROM tenant WHERE idtenant = ?';
+      const [[tenant]] = await pool.query(sqlTenant3, [ctx.idtenant]);
       return res.render('laporan_sales_per_barang', {
         data        : rows,                              grandTotal,
         tglwal      : tglwal || '-',                     tglakhir    : tglakhir || '-',
@@ -288,6 +304,7 @@ exports.salesPerBarang = async (req, res) => {
   }
 };
 
+// GET /api/laporan/pembelian — Laporan daftar transaksi pembelian
 exports.pembelian = async (req, res) => {
   try {
     const ctx = getTenantContext();
@@ -308,7 +325,8 @@ exports.pembelian = async (req, res) => {
     const totalPembelian = rows.reduce((sum, r) => sum + parseFloat(r.grandtotal || 0), 0);
 
     if (format === 'html') {
-      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      let sqlTenant4 = 'SELECT * FROM tenant WHERE idtenant = ?';
+      const [[tenant]] = await pool.query(sqlTenant4, [ctx.idtenant]);
       return res.render('laporan_pembelian', {
         data    : rows,                              totalPembelian,
         tglwal  : tglwal || '-',                     tglakhir      : tglakhir || '-',
@@ -325,6 +343,7 @@ exports.pembelian = async (req, res) => {
   }
 };
 
+// GET /api/laporan/sales-per-lokasi — Laporan penjualan dikelompokkan per lokasi/cabang
 exports.salesPerLokasi = async (req, res) => {
   try {
     const ctx = getTenantContext();
@@ -381,7 +400,8 @@ exports.salesPerLokasi = async (req, res) => {
     const grandTotal = rows.reduce((sum, r) => sum + parseFloat(r.total_penjualan || 0), 0);
 
     if (format === 'html') {
-      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      let sqlTenant5 = 'SELECT * FROM tenant WHERE idtenant = ?';
+      const [[tenant]] = await pool.query(sqlTenant5, [ctx.idtenant]);
       return res.render('laporan_sales_per_lokasi', {
         data        : rows,                              grandTotal,
         tglwal      : tglwal || '-',                     tglakhir    : tglakhir || '-',
@@ -401,6 +421,7 @@ exports.salesPerLokasi = async (req, res) => {
   }
 };
 
+// GET /api/laporan/pembelian-per-supplier — Laporan pembelian dikelompokkan per supplier
 exports.pembelianPerSupplier = async (req, res) => {
   try {
     const ctx = getTenantContext();
@@ -426,7 +447,8 @@ exports.pembelianPerSupplier = async (req, res) => {
     const grandTotal = rows.reduce((sum, r) => sum + parseFloat(r.total_pembelian || 0), 0);
 
     if (format === 'html') {
-      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      let sqlTenant6 = 'SELECT * FROM tenant WHERE idtenant = ?';
+      const [[tenant]] = await pool.query(sqlTenant6, [ctx.idtenant]);
       return res.render('laporan_pembelian_per_supplier', {
         data: rows, grandTotal,
         tglwal: tglwal || '-', tglakhir: tglakhir || '-',
@@ -443,6 +465,7 @@ exports.pembelianPerSupplier = async (req, res) => {
   }
 };
 
+// GET /api/laporan/pembelian-per-lokasi — Laporan pembelian dikelompokkan per lokasi/cabang
 exports.pembelianPerLokasi = async (req, res) => {
   try {
     const ctx = getTenantContext();
@@ -466,7 +489,8 @@ exports.pembelianPerLokasi = async (req, res) => {
     const grandTotal = rows.reduce((sum, r) => sum + parseFloat(r.total_pembelian || 0), 0);
 
     if (format === 'html') {
-      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      let sqlTenant7 = 'SELECT * FROM tenant WHERE idtenant = ?';
+      const [[tenant]] = await pool.query(sqlTenant7, [ctx.idtenant]);
       return res.render('laporan_pembelian_per_lokasi', {
         data: rows, grandTotal,
         tglwal: tglwal || '-', tglakhir: tglakhir || '-',
@@ -483,6 +507,7 @@ exports.pembelianPerLokasi = async (req, res) => {
   }
 };
 
+// GET /api/laporan/pembelian-per-barang — Laporan pembelian dikelompokkan per barang
 exports.pembelianPerBarang = async (req, res) => {
   try {
     const ctx = getTenantContext();
@@ -507,7 +532,8 @@ exports.pembelianPerBarang = async (req, res) => {
     const grandTotal = rows.reduce((sum, r) => sum + parseFloat(r.total_nilai || 0), 0);
 
     if (format === 'html') {
-      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      let sqlTenant8 = 'SELECT * FROM tenant WHERE idtenant = ?';
+      const [[tenant]] = await pool.query(sqlTenant8, [ctx.idtenant]);
       return res.render('laporan_pembelian_per_barang', {
         data    : rows,                              grandTotal,
         tglwal  : tglwal || '-',                     tglakhir  : tglakhir || '-',
@@ -524,6 +550,7 @@ exports.pembelianPerBarang = async (req, res) => {
   }
 };
 
+// GET /api/laporan/pembelian-rekap — Rekap pembelian (total transaksi, total pembelian, total dibayar, total hutang)
 exports.pembelianRekap = async (req, res) => {
   try {
     const ctx = getTenantContext();
@@ -543,7 +570,8 @@ exports.pembelianRekap = async (req, res) => {
     const rows = await tenantQuery(sql, params);
 
     if (req.query.format === 'html') {
-      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      let sqlTenant9 = 'SELECT * FROM tenant WHERE idtenant = ?';
+      const [[tenant]] = await pool.query(sqlTenant9, [ctx.idtenant]);
       return res.render('laporan_pembelian_rekap', {
         data: rows[0],
         tglwal: tglwal || '-', tglakhir: tglakhir || '-',
@@ -560,20 +588,24 @@ exports.pembelianRekap = async (req, res) => {
   }
 };
 
+// GET /api/laporan/stok — Laporan stok terkini per barang
 exports.stok = async (req, res) => {
   try {
     const ctx = getTenantContext();
     const { tgl } = req.query;
     const format = req.query.format || 'json';
 
+    // Cari saldo stok snapshot terbaru
+    let sqlSaldo = 'SELECT idsaldostok, kodesaldostok, tgltrans FROM saldostok WHERE idtenant = ? AND idlokasi = ? ORDER BY tgltrans DESC, idsaldostok DESC LIMIT 1';
     const [[latestSaldo]] = await pool.query(
-      'SELECT idsaldostok, kodesaldostok, tgltrans FROM saldostok WHERE idtenant = ? AND idlokasi = ? ORDER BY tgltrans DESC, idsaldostok DESC LIMIT 1',
+      sqlSaldo,
       [ctx.idtenant, ctx.idlokasi]
     );
 
     let sql;
     const params = [];
 
+    // Jika ada snapshot: stok = saldo snapshot + mutasi masuk - mutasi keluar setelahnya
     if (latestSaldo) {
       sql = `SELECT b.idbarang, b.kodebarang, b.namabarang, b.satuankecil as satuan, b.stokmin,
         COALESCE(sd.qty, 0) + COALESCE(km.masuk, 0) - COALESCE(km.keluar, 0) as stok
@@ -587,6 +619,7 @@ exports.stok = async (req, res) => {
         ) km ON km.idbarang = b.idbarang
         WHERE b.status = 'AKTIF' ORDER BY b.namabarang`;
       params.push(latestSaldo.idsaldostok, ctx.idtenant, ctx.idlokasi, latestSaldo.tgltrans);
+    // Jika tidak ada snapshot: stok langsung dari kartustok (masuk - keluar)
     } else {
       sql = `SELECT b.idbarang, b.kodebarang, b.namabarang, b.satuankecil as satuan, b.stokmin,
         COALESCE(m.total, 0) - COALESCE(k.total, 0) as stok
@@ -602,7 +635,8 @@ exports.stok = async (req, res) => {
     const totalStok = rows.reduce((sum, r) => sum + (parseInt(r.stok) || 0), 0);
 
     if (format === 'html') {
-      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      let sqlTenantStok = 'SELECT * FROM tenant WHERE idtenant = ?';
+      const [[tenant]] = await pool.query(sqlTenantStok, [ctx.idtenant]);
       return res.render('laporan_stok', {
         data: rows, totalBarang, totalStok,
         periodSaldo: latestSaldo ? latestSaldo.tgltrans : '-',
@@ -619,6 +653,7 @@ exports.stok = async (req, res) => {
   }
 };
 
+// GET /api/laporan/kartu-stok — Laporan mutasi stok (kartu stok) per barang
 exports.kartuStok = async (req, res) => {
   try {
     const ctx = getTenantContext();
@@ -639,7 +674,8 @@ exports.kartuStok = async (req, res) => {
     const rows = await tenantQuery(sql, params);
 
     if (format === 'html') {
-      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      let sqlTenantKartu = 'SELECT * FROM tenant WHERE idtenant = ?';
+      const [[tenant]] = await pool.query(sqlTenantKartu, [ctx.idtenant]);
       return res.render('laporan_kartu_stok', {
         data: rows,
         tglwal: tglwal || '-', tglakhir: tglakhir || '-',
@@ -656,6 +692,7 @@ exports.kartuStok = async (req, res) => {
   }
 };
 
+// GET /api/laporan/rekap-sales — Rekap penjualan (per transaksi, dengan status lunas/belum)
 exports.rekapSales = async (req, res) => {
   try {
     const ctx = getTenantContext();
@@ -707,6 +744,7 @@ exports.rekapSales = async (req, res) => {
 
     const rows = await tenantQuery(sql, params);
 
+    // Proses hasil query: hitung sisa dan status lunas
     const processed = rows.map(r => {
       const sisaVal = parseFloat(r.sisa) || 0;
       return {
@@ -725,8 +763,10 @@ exports.rekapSales = async (req, res) => {
     const totalPiutang = processed.reduce((sum, r) => sum + r.sisa, 0);
 
     if (format === 'html') {
-      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
-      const [[lokasi]] = await pool.query('SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?', [ctx.idlokasi, ctx.idtenant]);
+      let sqlTenantRekap = 'SELECT * FROM tenant WHERE idtenant = ?';
+      const [[tenant]] = await pool.query(sqlTenantRekap, [ctx.idtenant]);
+      let sqlLokasiRekap = 'SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?';
+      const [[lokasi]] = await pool.query(sqlLokasiRekap, [ctx.idlokasi, ctx.idtenant]);
       return res.render('laporan_sales_rekap', {
         data: processed,
         totalTransaksi, totalPenjualan, totalLunas, totalPiutang,
@@ -749,6 +789,7 @@ exports.rekapSales = async (req, res) => {
   }
 };
 
+// GET /api/laporan/struk/:id — Cetak struk penjualan (HTML)
 exports.struk = async (req, res) => {
   try {
     const ctx = getTenantContext();
@@ -774,8 +815,10 @@ exports.struk = async (req, res) => {
     );
 
     if (format === 'html') {
-      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
-      const [[lokasi]] = await pool.query('SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?', [ctx.idlokasi, ctx.idtenant]);
+      let sqlTenantStruk = 'SELECT * FROM tenant WHERE idtenant = ?';
+      const [[tenant]] = await pool.query(sqlTenantStruk, [ctx.idtenant]);
+      let sqlLokasiStruk = 'SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?';
+      const [[lokasi]] = await pool.query(sqlLokasiStruk, [ctx.idlokasi, ctx.idtenant]);
       return res.render('struk', {
         jual, detail,
         namatoko: tenant?.namatenant || 'Grfyn POS',
@@ -793,6 +836,7 @@ exports.struk = async (req, res) => {
   }
 };
 
+// GET /api/laporan/faktur/:id — Cetak faktur penjualan (HTML)
 exports.faktur = async (req, res) => {
   try {
     const ctx = getTenantContext();
@@ -818,8 +862,10 @@ exports.faktur = async (req, res) => {
     );
 
     if (format === 'html') {
-      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
-      const [[lokasi]] = await pool.query('SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?', [ctx.idlokasi, ctx.idtenant]);
+      let sqlTenantFaktur = 'SELECT * FROM tenant WHERE idtenant = ?';
+      const [[tenant]] = await pool.query(sqlTenantFaktur, [ctx.idtenant]);
+      let sqlLokasiFaktur = 'SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?';
+      const [[lokasi]] = await pool.query(sqlLokasiFaktur, [ctx.idlokasi, ctx.idtenant]);
       return res.render('faktur', {
         jual, detail,
         namatoko: tenant?.namatenant || 'Grfyn POS',

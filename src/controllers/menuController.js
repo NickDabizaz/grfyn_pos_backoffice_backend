@@ -1,19 +1,24 @@
+/**
+ * Controller untuk menu navigasi berdasarkan hak akses user.
+ * Endpoint: GET /api/menu/my
+ */
 const { pool, getTenantContext } = require('../config/db');
 const logger = require('../lib/logger');
 
+// GET /api/menu/my — Mengambil menu dalam bentuk tree sesuai user yang sedang login
 exports.myMenu = async (req, res) => {
   try {
     const ctx = getTenantContext();
     const iduser = ctx.iduser;
 
-    const [menus] = await pool.query(
-      `SELECT m.* FROM menu m
+    let sql = `SELECT m.* FROM menu m
        JOIN usermenu um ON m.idmenu = um.idmenu AND um.iduser = ?
        WHERE um.status = 'AKTIF'
-       ORDER BY m.urutan ASC`,
-      [iduser]
-    );
+       ORDER BY m.urutan ASC`;
+    // Ambil semua menu yang diizinkan untuk user ini
+    const [menus] = await pool.query(sql, [iduser]);
 
+    // Fungsi rekursif membangun struktur tree menu (parent-child)
     function buildTree(items, parentId = null) {
       return items
         .filter(item => item.idparent === parentId)

@@ -1,9 +1,13 @@
+// Controller untuk transaksi retur penjualan — menangani pengembalian barang dari customer
+// Endpoint: POST /create, GET /getAll, GET /getOne/:id, POST /cancel/:id
 const { tenantQuery, tenantExecute, getConnection, getTenantContext } = require('../config/db');
 const { generateKodeReturJual } = require('../lib/kodetrans');
 const logger = require('../lib/logger');
 
+// Daftar tindak lanjut yang valid untuk barang retur
 const VALID_TINDAKLANJUT = ['MASUK_STOK', 'MASUK_STOK_2ND', 'HANGUS'];
 
+// POST — Membuat retur penjualan baru. Menyimpan header, detail, pergerakan stok, dan piutang jika ada customer.
 exports.create = async (req, res) => {
   const conn = await getConnection();
   try {
@@ -11,8 +15,10 @@ exports.create = async (req, res) => {
     await conn.beginTransaction();
     const { idcustomer, idjual, kodejual, items, catatan } = req.body;
 
+    // Validasi: minimal satu item retur
     if (!items || !items.length) return res.status(400).json({ message: 'Items tidak boleh kosong' });
 
+    // Validasi tiap item: tindaklanjut harus valid dan idbarang2nd wajib jika tindaklanjut MASUK_STOK_2ND
     for (const item of items) {
       if (!VALID_TINDAKLANJUT.includes(item.tindaklanjut)) {
         return res.status(400).json({ message: `tindaklanjut tidak valid: ${item.tindaklanjut}` });
@@ -22,50 +28,59 @@ exports.create = async (req, res) => {
       }
     }
 
+    // Generate kode retur unik per lokasi
     const kodereturjual = await generateKodeReturJual(conn, ctx.idtenant, ctx.idlokasi);
     const tgltrans = req.body.tgltrans || new Date().toISOString().slice(0, 10);
 
-    await conn.query(
-      'INSERT INTO returjual (idtenant, idlokasi, kodereturjual, tgltrans, idcustomer, idjual, kodejual, iduser, total, catatan, status, userentry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)',
+    // Insert header returjual
+    let sql = 'INSERT INTO returjual (idtenant, idlokasi, kodereturjual, tgltrans, idcustomer, idjual, kodejual, iduser, total, catatan, status, userentry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)';
+    await conn.query(sql,
       [ctx.idtenant, ctx.idlokasi, kodereturjual, tgltrans, idcustomer || null, idjual || null, kodejual || null, ctx.iduser, catatan || null, 'AKTIF', ctx.iduser]
     );
 
-    const [[header]] = await conn.query(
-      'SELECT idreturjual FROM returjual WHERE kodereturjual = ? AND idtenant = ? AND idlokasi = ?',
+    // Ambil id header yang baru dibuat
+    let sql2 = 'SELECT idreturjual FROM returjual WHERE kodereturjual = ? AND idtenant = ? AND idlokasi = ?';
+    const [[header]] = await conn.query(sql2,
       [kodereturjual, ctx.idtenant, ctx.idlokasi]
     );
 
+    // Akumulasi total retur dari seluruh item
     let calculatedTotal = 0;
 
     for (const item of items) {
       const subtotal = parseFloat(item.harga || 0) * item.jml;
       calculatedTotal += subtotal;
 
-      await conn.query(
-        'INSERT INTO returjualdtl (idreturjual, idtenant, idbarang, jml, harga, subtotal, tindaklanjut, idbarang2nd) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      // Insert detail retur per item
+      let sql3 = 'INSERT INTO returjualdtl (idreturjual, idtenant, idbarang, jml, harga, subtotal, tindaklanjut, idbarang2nd) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
+      await conn.query(sql3,
         [header.idreturjual, ctx.idtenant, item.idbarang, item.jml, item.harga || 0, subtotal, item.tindaklanjut, item.idbarang2nd || null]
       );
 
+      // Pergerakan stok sesuai tindaklanjut: MASUK_STOK → stok normal, MASUK_STOK_2ND → stok second
       if (item.tindaklanjut === 'MASUK_STOK') {
-        await conn.query(
-          'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        let sql4 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        await conn.query(sql4,
           [ctx.idtenant, ctx.idlokasi, kodereturjual, item.idbarang, item.jml, 'M', tgltrans, `Retur Penjualan ${kodereturjual}`, header.idreturjual, 'returjual']
         );
       } else if (item.tindaklanjut === 'MASUK_STOK_2ND') {
-        await conn.query(
-          'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        let sql5 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        await conn.query(sql5,
           [ctx.idtenant, ctx.idlokasi, kodereturjual, item.idbarang2nd, item.jml, 'M', tgltrans, `Retur Penjualan 2nd ${kodereturjual}`, header.idreturjual, 'returjual']
         );
       }
-      // HANGUS: tidak ada pergerakan stok
+      // HANGUS: tidak ada pergerakan stok — barang dianggap rusak/hilang
     }
 
-    await conn.query('UPDATE returjual SET total = ? WHERE idreturjual = ? AND idtenant = ?',
+    // Update total retur di header setelah semua item dihitung
+    let sql6 = 'UPDATE returjual SET total = ? WHERE idreturjual = ? AND idtenant = ?';
+    await conn.query(sql6,
       [calculatedTotal, header.idreturjual, ctx.idtenant]);
 
+    // Jika retur terkait penjualan & customer, catat pengurang piutang
     if (kodejual && idcustomer) {
-      await conn.query(
-        'INSERT INTO kartupiutang (idtenant, idlokasi, idcustomer, kodetrans, jenis, kodetransreferensi, amount, tgltrans, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      let sql7 = 'INSERT INTO kartupiutang (idtenant, idlokasi, idcustomer, kodetrans, jenis, kodetransreferensi, amount, tgltrans, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
+      await conn.query(sql7,
         [ctx.idtenant, ctx.idlokasi, idcustomer, kodejual, 'RETUR', kodereturjual, -calculatedTotal, tgltrans, 'OPEN']
       );
     }
@@ -82,6 +97,7 @@ exports.create = async (req, res) => {
   }
 };
 
+// GET — Mendapatkan daftar retur penjualan dengan filter tanggal, customer, dan pencarian kode
 exports.getAll = async (req, res) => {
   try {
     const ctx = getTenantContext();
@@ -104,21 +120,24 @@ exports.getAll = async (req, res) => {
   }
 };
 
+// GET — Mendapatkan detail satu retur penjualan beserta item-itemnya
 exports.getOne = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const rows = await tenantQuery(`SELECT r.*, c.namacustomer
+    let sql = `SELECT r.*, c.namacustomer
       FROM returjual r
       LEFT JOIN customer c ON r.idcustomer = c.idcustomer AND c.idtenant = r.idtenant
-      WHERE r.idreturjual = ? AND r.idlokasi = ?`, [req.params.id, ctx.idlokasi]);
+      WHERE r.idreturjual = ? AND r.idlokasi = ?`;
+    const rows = await tenantQuery(sql, [req.params.id, ctx.idlokasi]);
     if (rows.length === 0) return res.status(404).json({ message: 'Retur tidak ditemukan' });
 
-    const items = await tenantQuery(`SELECT rd.*, b.namabarang, b.satuankecil,
+    let sql2 = `SELECT rd.*, b.namabarang, b.satuankecil,
         b2.namabarang as namabarang2nd
       FROM returjualdtl rd
       LEFT JOIN barang b ON rd.idbarang = b.idbarang AND b.idtenant = rd.idtenant
       LEFT JOIN barang b2 ON rd.idbarang2nd = b2.idbarang AND b2.idtenant = rd.idtenant
-      WHERE rd.idreturjual = ?`, [req.params.id]);
+      WHERE rd.idreturjual = ?`;
+    const items = await tenantQuery(sql2, [req.params.id]);
     res.json({ ...rows[0], items });
   } catch (err) {
     logger.error(err, { req });
@@ -126,6 +145,7 @@ exports.getOne = async (req, res) => {
   }
 };
 
+// POST — Membatalkan retur penjualan: ubah status ke VOID, balik pergerakan stok, hapus piutang
 exports.cancel = async (req, res) => {
   const conn = await getConnection();
   try {
@@ -133,29 +153,36 @@ exports.cancel = async (req, res) => {
     await conn.beginTransaction();
     const { id } = req.params;
 
-    const [[retur]] = await conn.query('SELECT * FROM returjual WHERE idreturjual = ? AND idtenant = ? AND idlokasi = ?', [id, ctx.idtenant, ctx.idlokasi]);
+    // Cek keberadaan dan status retur
+    let sql = 'SELECT * FROM returjual WHERE idreturjual = ? AND idtenant = ? AND idlokasi = ?';
+    const [[retur]] = await conn.query(sql, [id, ctx.idtenant, ctx.idlokasi]);
     if (!retur) return res.status(404).json({ message: 'Retur tidak ditemukan' });
     if (retur.status === 'VOID') return res.status(400).json({ message: 'Retur sudah dibatalkan' });
 
-    await conn.query('UPDATE returjual SET status = ? WHERE idreturjual = ? AND idtenant = ? AND idlokasi = ?', ['VOID', id, ctx.idtenant, ctx.idlokasi]);
+    // Ubah status retur menjadi VOID
+    let sql2 = 'UPDATE returjual SET status = ? WHERE idreturjual = ? AND idtenant = ? AND idlokasi = ?';
+    await conn.query(sql2, ['VOID', id, ctx.idtenant, ctx.idlokasi]);
 
-    await conn.query(
-      "DELETE FROM kartupiutang WHERE kodetransreferensi = ? AND idtenant = ? AND idlokasi = ? AND jenis = 'RETUR'",
+    // Hapus catatan piutang terkait retur ini
+    let sql3 = "DELETE FROM kartupiutang WHERE kodetransreferensi = ? AND idtenant = ? AND idlokasi = ? AND jenis = 'RETUR'";
+    await conn.query(sql3,
       [retur.kodereturjual, ctx.idtenant, ctx.idlokasi]
     );
 
-    const [details] = await conn.query('SELECT * FROM returjualdtl WHERE idreturjual = ? AND idtenant = ?', [id, ctx.idtenant]);
+    let sql4 = 'SELECT * FROM returjualdtl WHERE idreturjual = ? AND idtenant = ?';
+    const [details] = await conn.query(sql4, [id, ctx.idtenant]);
     const today = new Date().toISOString().slice(0, 10);
 
+    // Balik semua pergerakan stok dari detail retur (MASUK → KELUAR)
     for (const dtl of details) {
       if (dtl.tindaklanjut === 'MASUK_STOK') {
-        await conn.query(
-          'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        let sql5 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        await conn.query(sql5,
           [ctx.idtenant, ctx.idlokasi, `VOID-${retur.kodereturjual}`, dtl.idbarang, dtl.jml, 'K', today, `Batal Retur ${retur.kodereturjual}`, retur.idreturjual, 'returjual_void']
         );
       } else if (dtl.tindaklanjut === 'MASUK_STOK_2ND' && dtl.idbarang2nd) {
-        await conn.query(
-          'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        let sql6 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        await conn.query(sql6,
           [ctx.idtenant, ctx.idlokasi, `VOID-${retur.kodereturjual}`, dtl.idbarang2nd, dtl.jml, 'K', today, `Batal Retur 2nd ${retur.kodereturjual}`, retur.idreturjual, 'returjual_void']
         );
       }

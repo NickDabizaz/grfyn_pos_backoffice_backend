@@ -1,16 +1,21 @@
+// Controller untuk manajemen data user dan template menu.
+// Menangani CRUD user, reset password, manajemen menu/lokasi user, dan template menu.
+
 const bcrypt = require('bcryptjs');
 const { tenantQuery, tenantExecute, getConnection, getTenantContext } = require('../config/db');
 const logger = require('../lib/logger');
 
+// GET /user — Menampilkan semua user dalam tenant beserta jumlah lokasi dan menu yang di-assign
 exports.getAll = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const rows = await tenantQuery(
-      `SELECT u.iduser, u.username, u.namauser, u.email, u.hp, u.isowner, u.status,
+    let sql = `SELECT u.iduser, u.username, u.namauser, u.email, u.hp, u.isowner, u.status,
         u.tglentry,
         (SELECT COUNT(*) FROM userlokasi ul WHERE ul.iduser = u.iduser AND ul.status = 'AKTIF') as jml_lokasi,
         (SELECT COUNT(*) FROM usermenu um WHERE um.iduser = u.iduser AND um.status = 'AKTIF') as jml_menu
-       FROM user u WHERE u.idtenant = ? ORDER BY u.iduser ASC`,
+       FROM user u WHERE u.idtenant = ? ORDER BY u.iduser ASC`;
+    const rows = await tenantQuery(
+      sql,
       [ctx.idtenant]
     );
     res.json(rows);
@@ -20,11 +25,13 @@ exports.getAll = async (req, res) => {
   }
 };
 
+// GET /user/:id — Menampilkan detail satu user
 exports.getOne = async (req, res) => {
   try {
     const ctx = getTenantContext();
+    let sql = 'SELECT u.iduser, u.username, u.namauser, u.email, u.hp, u.isowner, u.status FROM user u WHERE u.iduser = ?';
     const rows = await tenantQuery(
-      'SELECT u.iduser, u.username, u.namauser, u.email, u.hp, u.isowner, u.status FROM user u WHERE u.iduser = ?',
+      sql,
       [req.params.id]
     );
     if (rows.length === 0) return res.status(404).json({ message: 'User tidak ditemukan' });
@@ -35,19 +42,22 @@ exports.getOne = async (req, res) => {
   }
 };
 
+// POST /user — Membuat user baru; dapat mengassign menu (via template atau manual) dan lokasi
 exports.create = async (req, res) => {
   const conn = await getConnection();
   try {
     const ctx = getTenantContext();
     const { username, pass, namauser, email, hp, menus, lokasis, idtemplate } = req.body;
 
+    // Validasi: field wajib
     if (!username || !pass || !namauser) {
       return res.status(400).json({ message: 'Username, password, dan nama wajib diisi' });
     }
 
-    // Cek username unik di tenant ini
+    // Validasi: cek username unik dalam tenant ini
+    let sqlCheckUser = 'SELECT COUNT(*) as cnt FROM user WHERE username = ? AND idtenant = ?';
     const [[existing]] = await conn.query(
-      'SELECT COUNT(*) as cnt FROM user WHERE username = ? AND idtenant = ?',
+      sqlCheckUser,
       [username.toUpperCase(), ctx.idtenant]
     );
     if (existing.cnt > 0) {
@@ -56,53 +66,62 @@ exports.create = async (req, res) => {
 
     await conn.beginTransaction();
 
+    // Password di-hash dengan bcrypt 10 salt rounds
     const hash = await bcrypt.hash(pass, 10);
+    let sqlInsertUser = 'INSERT INTO user (idtenant, username, pass, namauser, email, hp, isowner, tokenversion, status, userentry) VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?, ?)';
     const [result] = await conn.query(
-      'INSERT INTO user (idtenant, username, pass, namauser, email, hp, isowner, tokenversion, status, userentry) VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?, ?)',
+      sqlInsertUser,
       [ctx.idtenant, username.toUpperCase(), hash, namauser, email || null, hp || null, 'AKTIF', ctx.iduser]
     );
     const iduser = result.insertId;
 
     // Update userentry ke self
-    await conn.query('UPDATE user SET userentry = ? WHERE iduser = ?', [iduser, iduser]);
+    let sqlUpdateEntry = 'UPDATE user SET userentry = ? WHERE iduser = ?';
+    await conn.query(sqlUpdateEntry, [iduser, iduser]);
 
-    // Apply template if selected
+    // Assign menu dari template jika dipilih
     if (idtemplate) {
+      let sqlTemplateDtl = 'SELECT idmenu FROM menutemplatedtl WHERE idmenutemplate = ? AND status = ?';
       const [templateDtl] = await conn.query(
-        'SELECT idmenu FROM menutemplatedtl WHERE idmenutemplate = ? AND status = ?',
+        sqlTemplateDtl,
         [idtemplate, 'AKTIF']
       );
       for (const d of templateDtl) {
+        let sqlInsMenuTpl = "INSERT INTO usermenu (iduser, idmenu, status, userentry) VALUES (?, ?, 'AKTIF', ?)";
         await conn.query(
-          "INSERT INTO usermenu (iduser, idmenu, status, userentry) VALUES (?, ?, 'AKTIF', ?)",
+          sqlInsMenuTpl,
           [iduser, d.idmenu, ctx.iduser]
         );
       }
     }
 
-    // Custom menus
+    // Assign menu kustom (jika tidak pakai template atau tambahan)
     if (menus && menus.length > 0) {
       for (const idmenu of menus) {
         try {
+          let sqlInsMenu = "INSERT INTO usermenu (iduser, idmenu, status, userentry) VALUES (?, ?, 'AKTIF', ?)";
           await conn.query(
-            "INSERT INTO usermenu (iduser, idmenu, status, userentry) VALUES (?, ?, 'AKTIF', ?)",
+            sqlInsMenu,
             [iduser, idmenu, ctx.iduser]
           );
         } catch (e) {
+          // Abaikan error duplicate entry (menu sudah ada dari template)
           if (e.code !== 'ER_DUP_ENTRY') throw e;
         }
       }
     }
 
-    // Lokasi
+    // Assign lokasi ke user
     if (lokasis && lokasis.length > 0) {
       for (const idlokasi of lokasis) {
         try {
+          let sqlInsLokasi = "INSERT INTO userlokasi (iduser, idlokasi, status, userentry) VALUES (?, ?, 'AKTIF', ?)";
           await conn.query(
-            "INSERT INTO userlokasi (iduser, idlokasi, status, userentry) VALUES (?, ?, 'AKTIF', ?)",
+            sqlInsLokasi,
             [iduser, idlokasi, ctx.iduser]
           );
         } catch (e) {
+          // Abaikan error duplicate entry
           if (e.code !== 'ER_DUP_ENTRY') throw e;
         }
       }
@@ -123,6 +142,7 @@ exports.create = async (req, res) => {
   }
 };
 
+// PUT /user/:id — Memperbarui data user, menu akses, dan lokasi; owner tidak bisa dinonaktifkan
 exports.update = async (req, res) => {
   const conn = await getConnection();
   try {
@@ -130,42 +150,49 @@ exports.update = async (req, res) => {
     const { id } = req.params;
     const { namauser, email, hp, status, menus, lokasis } = req.body;
 
-    const [users] = await conn.query('SELECT * FROM user WHERE iduser = ? AND idtenant = ?', [id, ctx.idtenant]);
+    // Validasi: cek user ada
+    let sqlSelectUser = 'SELECT * FROM user WHERE iduser = ? AND idtenant = ?';
+    const [users] = await conn.query(sqlSelectUser, [id, ctx.idtenant]);
     if (users.length === 0) return res.status(404).json({ message: 'User tidak ditemukan' });
 
     const target = users[0];
 
-    // Owner tidak bisa di-nonaktifkan
+    // Validasi: owner tidak bisa dinonaktifkan
     if (target.isowner && status === 'NONAKTIF') {
       return res.status(400).json({ message: 'Owner tidak dapat dinonaktifkan' });
     }
 
     await conn.beginTransaction();
 
-    // Update user
+    // Update data user — tokenversion di-increment agar token lama tidak valid
     const newStatus = status || target.status;
+    let sqlUpdateUser = 'UPDATE user SET namauser = ?, email = ?, hp = ?, status = ?, tokenversion = tokenversion + 1 WHERE iduser = ? AND idtenant = ?';
     await conn.query(
-      'UPDATE user SET namauser = ?, email = ?, hp = ?, status = ?, tokenversion = tokenversion + 1 WHERE iduser = ? AND idtenant = ?',
+      sqlUpdateUser,
       [namauser || target.namauser, email ?? target.email, hp ?? target.hp, newStatus, id, ctx.idtenant]
     );
 
-    // Update menus
+    // Update daftar menu akses: hapus semua lalu insert ulang
     if (menus !== undefined) {
-      await conn.query('DELETE FROM usermenu WHERE iduser = ?', [id]);
+      let sqlDelMenu = 'DELETE FROM usermenu WHERE iduser = ?';
+      await conn.query(sqlDelMenu, [id]);
       for (const idmenu of (menus || [])) {
+        let sqlInsMenuUpd = "INSERT INTO usermenu (iduser, idmenu, status, userentry) VALUES (?, ?, 'AKTIF', ?)";
         await conn.query(
-          "INSERT INTO usermenu (iduser, idmenu, status, userentry) VALUES (?, ?, 'AKTIF', ?)",
+          sqlInsMenuUpd,
           [id, idmenu, ctx.iduser]
         );
       }
     }
 
-    // Update lokasis
+    // Update daftar lokasi akses: hapus semua lalu insert ulang
     if (lokasis !== undefined) {
-      await conn.query('DELETE FROM userlokasi WHERE iduser = ?', [id]);
+      let sqlDelLokasi = 'DELETE FROM userlokasi WHERE iduser = ?';
+      await conn.query(sqlDelLokasi, [id]);
       for (const idlokasi of (lokasis || [])) {
+        let sqlInsLokasiUpd = "INSERT INTO userlokasi (iduser, idlokasi, status, userentry) VALUES (?, ?, 'AKTIF', ?)";
         await conn.query(
-          "INSERT INTO userlokasi (iduser, idlokasi, status, userentry) VALUES (?, ?, 'AKTIF', ?)",
+          sqlInsLokasiUpd,
           [id, idlokasi, ctx.iduser]
         );
       }
@@ -183,24 +210,30 @@ exports.update = async (req, res) => {
   }
 };
 
+// PUT /user/:id/reset-password — Mereset password user oleh admin; tokenversion di-increment
 exports.resetPassword = async (req, res) => {
   try {
     const ctx = getTenantContext();
     const { id } = req.params;
     const { newPass } = req.body;
 
+    // Validasi: panjang password minimal 6 karakter
     if (!newPass || newPass.length < 6) {
       return res.status(400).json({ message: 'Password minimal 6 karakter' });
     }
 
+    // Validasi: cek user target ada
+    let sqlSelectReset = 'SELECT * FROM user WHERE iduser = ? AND idtenant = ?';
     const [users] = await require('../config/db').pool.query(
-      'SELECT * FROM user WHERE iduser = ? AND idtenant = ?', [id, ctx.idtenant]
+      sqlSelectReset, [id, ctx.idtenant]
     );
     if (users.length === 0) return res.status(404).json({ message: 'User tidak ditemukan' });
 
+    // Hash password baru dan increment tokenversion untuk invalidasi semua sesi user target
     const hash = await bcrypt.hash(newPass, 10);
+    let sqlUpdatePass = 'UPDATE user SET pass = ?, tokenversion = tokenversion + 1 WHERE iduser = ?';
     await tenantExecute(
-      'UPDATE user SET pass = ?, tokenversion = tokenversion + 1 WHERE iduser = ?',
+      sqlUpdatePass,
       [hash, id]
     );
 
@@ -212,12 +245,14 @@ exports.resetPassword = async (req, res) => {
   }
 };
 
+// GET /user/:id/menus — Menampilkan daftar menu yang di-assign ke user
 exports.getMenus = async (req, res) => {
   try {
-    const rows = await tenantQuery(
-      `SELECT m.* FROM menu m
+    let sqlMenus = `SELECT m.* FROM menu m
        JOIN usermenu um ON m.idmenu = um.idmenu AND um.iduser = ?
-       WHERE um.status = 'AKTIF'`,
+       WHERE um.status = 'AKTIF'`;
+    const rows = await tenantQuery(
+      sqlMenus,
       [req.params.id]
     );
     res.json(rows);
@@ -227,12 +262,14 @@ exports.getMenus = async (req, res) => {
   }
 };
 
+// GET /user/:id/lokasis — Menampilkan daftar lokasi yang di-assign ke user
 exports.getLokasis = async (req, res) => {
   try {
-    const rows = await tenantQuery(
-      `SELECT l.* FROM lokasi l
+    let sqlLokasis = `SELECT l.* FROM lokasi l
        JOIN userlokasi ul ON l.idlokasi = ul.idlokasi AND ul.iduser = ?
-       WHERE ul.status = 'AKTIF'`,
+       WHERE ul.status = 'AKTIF'`;
+    const rows = await tenantQuery(
+      sqlLokasis,
       [req.params.id]
     );
     res.json(rows);
@@ -242,13 +279,15 @@ exports.getLokasis = async (req, res) => {
   }
 };
 
-// === TEMPLATE ===
+// ─── TEMPLATE MENU ────────────────────────────────────────────────
 
+// GET /user/templates — Menampilkan semua template menu dalam tenant
 exports.getAllTemplates = async (req, res) => {
   try {
     const ctx = getTenantContext();
+    let sqlTemplates = 'SELECT * FROM menutemplate WHERE idtenant = ? ORDER BY namatemplate ASC';
     const rows = await tenantQuery(
-      'SELECT * FROM menutemplate WHERE idtenant = ? ORDER BY namatemplate ASC',
+      sqlTemplates,
       [ctx.idtenant]
     );
     res.json(rows);
@@ -258,12 +297,14 @@ exports.getAllTemplates = async (req, res) => {
   }
 };
 
+// GET /user/templates/:id — Menampilkan detail menu dalam satu template
 exports.getTemplateDetail = async (req, res) => {
   try {
-    const rows = await tenantQuery(
-      `SELECT m.* FROM menu m
+    let sqlTplDetail = `SELECT m.* FROM menu m
        JOIN menutemplatedtl mt ON m.idmenu = mt.idmenu AND mt.idmenutemplate = ?
-       WHERE mt.status = 'AKTIF'`,
+       WHERE mt.status = 'AKTIF'`;
+    const rows = await tenantQuery(
+      sqlTplDetail,
       [req.params.id]
     );
     res.json(rows);
@@ -273,6 +314,7 @@ exports.getTemplateDetail = async (req, res) => {
   }
 };
 
+// POST /user/templates — Membuat template menu baru
 exports.createTemplate = async (req, res) => {
   const conn = await getConnection();
   try {
@@ -281,15 +323,19 @@ exports.createTemplate = async (req, res) => {
 
     await conn.beginTransaction();
 
+    // Insert header template
+    let sqlInsTpl = 'INSERT INTO menutemplate (idtenant, namatemplate, status, userentry) VALUES (?, ?, ?, ?)';
     const [result] = await conn.query(
-      'INSERT INTO menutemplate (idtenant, namatemplate, status, userentry) VALUES (?, ?, ?, ?)',
+      sqlInsTpl,
       [ctx.idtenant, namatemplate, 'AKTIF', ctx.iduser]
     );
     const idmenutemplate = result.insertId;
 
+    // Insert detail menu template
     for (const idmenu of (menus || [])) {
+      let sqlInsTplDtl = "INSERT INTO menutemplatedtl (idmenutemplate, idmenu, status) VALUES (?, ?, 'AKTIF')";
       await conn.query(
-        "INSERT INTO menutemplatedtl (idmenutemplate, idmenu, status) VALUES (?, ?, 'AKTIF')",
+        sqlInsTplDtl,
         [idmenutemplate, idmenu]
       );
     }
@@ -305,6 +351,7 @@ exports.createTemplate = async (req, res) => {
   }
 };
 
+// PUT /user/templates/:id — Memperbarui template menu
 exports.updateTemplate = async (req, res) => {
   const conn = await getConnection();
   try {
@@ -312,18 +359,25 @@ exports.updateTemplate = async (req, res) => {
     const { id } = req.params;
     const { namatemplate, menus } = req.body;
 
-    const [templates] = await conn.query('SELECT * FROM menutemplate WHERE idmenutemplate = ? AND idtenant = ?', [id, ctx.idtenant]);
+    // Validasi: cek template ada
+    let sqlSelTpl = 'SELECT * FROM menutemplate WHERE idmenutemplate = ? AND idtenant = ?';
+    const [templates] = await conn.query(sqlSelTpl, [id, ctx.idtenant]);
     if (templates.length === 0) return res.status(404).json({ message: 'Template tidak ditemukan' });
 
     await conn.beginTransaction();
 
-    await conn.query('UPDATE menutemplate SET namatemplate = ? WHERE idmenutemplate = ?', [namatemplate || templates[0].namatemplate, id]);
+    // Update nama template
+    let sqlUpdTpl = 'UPDATE menutemplate SET namatemplate = ? WHERE idmenutemplate = ?';
+    await conn.query(sqlUpdTpl, [namatemplate || templates[0].namatemplate, id]);
 
+    // Update daftar menu template: hapus semua lalu insert ulang
     if (menus !== undefined) {
-      await conn.query('DELETE FROM menutemplatedtl WHERE idmenutemplate = ?', [id]);
+      let sqlDelTplDtl = 'DELETE FROM menutemplatedtl WHERE idmenutemplate = ?';
+      await conn.query(sqlDelTplDtl, [id]);
       for (const idmenu of (menus || [])) {
+        let sqlInsTplDtlUpd = "INSERT INTO menutemplatedtl (idmenutemplate, idmenu, status) VALUES (?, ?, 'AKTIF')";
         await conn.query(
-          "INSERT INTO menutemplatedtl (idmenutemplate, idmenu, status) VALUES (?, ?, 'AKTIF')",
+          sqlInsTplDtlUpd,
           [id, idmenu]
         );
       }
@@ -340,11 +394,13 @@ exports.updateTemplate = async (req, res) => {
   }
 };
 
+// DELETE /user/templates/:id — Menghapus template menu
 exports.deleteTemplate = async (req, res) => {
   try {
     const ctx = getTenantContext();
+    let sqlDelTpl = 'DELETE FROM menutemplate WHERE idmenutemplate = ? AND idtenant = ?';
     await tenantExecute(
-      'DELETE FROM menutemplate WHERE idmenutemplate = ? AND idtenant = ?',
+      sqlDelTpl,
       [req.params.id, ctx.idtenant]
     );
     res.json({ message: 'Template berhasil dihapus' });
