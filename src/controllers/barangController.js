@@ -34,15 +34,23 @@ exports.getAll = async (req, res) => {
 // GET /barang/browse — Menampilkan daftar barang aktif untuk dropdown/browse
 exports.browseBarang = async (req, res) => {
   try {
+    const ctx = getTenantContext();
     const { search } = req.query;
-    let sql = `SELECT * FROM barang WHERE status = 'AKTIF'`;
-    const params = [];
+    let sql = `SELECT b.*,
+      (SELECT hargabeli FROM hargabeli WHERE idbarang = b.idbarang AND idtenant = ? ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1) as hargabeli_terbaru,
+      (SELECT hargajual FROM hargajual WHERE idbarang = b.idbarang AND idtenant = ? ORDER BY tgltrans DESC, idhargajual DESC LIMIT 1) as hargajual_terbaru,
+      COALESCE(SUM(CASE WHEN ks.jenis='M' THEN ks.jml ELSE -ks.jml END), 0) as stok
+    FROM barang b
+    LEFT JOIN kartustok ks ON ks.idbarang = b.idbarang AND ks.idtenant = ?
+    WHERE b.status = 'AKTIF'`;
+    const params = [ctx.idtenant, ctx.idtenant, ctx.idtenant];
+    
     // Filter opsional: pencarian berdasarkan nama/kode barang
     if (search) {
-      sql += ' AND (namabarang LIKE ? OR kodebarang LIKE ?)';
+      sql += ' AND (b.namabarang LIKE ? OR b.kodebarang LIKE ?)';
       params.push(`%${search}%`, `%${search}%`);
     }
-    sql += ' ORDER BY kodebarang, namabarang';
+    sql += ' GROUP BY b.idbarang ORDER BY b.kodebarang, b.namabarang';
     const rows = await tenantQuery(sql, params);
     res.json(rows);
   } catch (err) {

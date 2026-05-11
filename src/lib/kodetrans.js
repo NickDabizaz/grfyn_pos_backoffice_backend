@@ -183,6 +183,11 @@ async function generateKodePelunasanHutang(conn, idtenant, idlokasi) {
   return generateKode(conn, 'PH', idtenant, idlokasi, 'pelunasanhutang', 'kodepelunasan');
 }
 
+// Generate kode produksi: format PRD.KODELOKASI.YYMMDD.NNN
+async function generateKodeProduksi(conn, idtenant, idlokasi) {
+  return generateKode(conn, 'PRD', idtenant, idlokasi, 'produksi', 'kodeproduksi');
+}
+
 module.exports = {
   generateKode,
   generateKodeJual,
@@ -197,4 +202,5 @@ module.exports = {
   generateKodeTukarBarang,
   generateKodePelunasanPiutang,
   generateKodePelunasanHutang,
+  generateKodeProduksi,
 };

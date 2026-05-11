@@ -37,6 +37,7 @@ const kartupiutangRoutes = require('./routes/kartupiutang');
 const pelunasanpiutangRoutes = require('./routes/pelunasanpiutang');
 const kartuhutangRoutes = require('./routes/kartuhutang');
 const pelunasanhutangRoutes = require('./routes/pelunasanhutang');
+const produksiRoutes = require('./routes/produksiRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -93,6 +94,7 @@ app.use('/api/kartupiutang', kartupiutangRoutes);
 app.use('/api/pelunasanpiutang', pelunasanpiutangRoutes);
 app.use('/api/kartuhutang', kartuhutangRoutes);
 app.use('/api/pelunasanhutang', pelunasanhutangRoutes);
+app.use('/api/produksi', produksiRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

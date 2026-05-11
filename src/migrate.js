@@ -810,6 +810,45 @@ async function migrate() {
 
   console.log('All tables created');
 
+  // produksi
+  await connection.query(`
+    CREATE TABLE produksi (
+      idproduksi    INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant      INT NOT NULL,
+      kodeproduksi  VARCHAR(50) NOT NULL,
+      idlokasi      INT NOT NULL,
+      tgltrans      DATE NOT NULL,
+      catatan       TEXT NULL,
+      total_bahan   DECIMAL(15,2) DEFAULT 0,
+      total_hasil   DECIMAL(15,2) DEFAULT 0,
+      status        VARCHAR(20) DEFAULT 'AKTIF',
+      userentry     INT,
+      tglentry      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
+      FOREIGN KEY (userentry) REFERENCES user(iduser),
+      UNIQUE KEY uk_kodeproduksi (idtenant, kodeproduksi)
+    ) ENGINE=InnoDB
+  `);
+
+  // produksidtl
+  await connection.query(`
+    CREATE TABLE produksidtl (
+      idproduksidtl INT AUTO_INCREMENT PRIMARY KEY,
+      idproduksi    INT NOT NULL,
+      idtenant      INT NOT NULL,
+      idbarang      INT NOT NULL,
+      jenisbarang   ENUM('BAHAN BAKU', 'BAHAN SETENGAH JADI', 'BAHAN JADI') NOT NULL,
+      jml           DECIMAL(15,2) NOT NULL,
+      satuan        VARCHAR(20) NULL,
+      harga_satuan  DECIMAL(15,2) DEFAULT 0,
+      subtotal      DECIMAL(15,2) DEFAULT 0,
+      FOREIGN KEY (idproduksi) REFERENCES produksi(idproduksi) ON DELETE CASCADE,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idbarang) REFERENCES barang(idbarang)
+    ) ENGINE=InnoDB
+  `);
+
   // ============================================================
   // SEED DATA
   // ============================================================
@@ -861,6 +900,7 @@ async function migrate() {
     [17, 6, 'stok.penyesuaian',  'Penyesuaian Stok',            2, null, '/stok/penyesuaian'],
     [18, 6, 'stok.kartustok',    'Kartu Stok',                  3, null, '/stok/kartustok'],
     [24, 6, 'stok.hitunghpp',    'Hitung HPP',                  4, null, '/stok/hitunghpp'],
+    [34, 6, 'stok.produksi',     'Produksi',                     5, null, '/stok/produksi'],
   ];
   for (const m of stokChildren) {
     await connection.query(

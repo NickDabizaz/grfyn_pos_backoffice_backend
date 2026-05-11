@@ -7,6 +7,20 @@
 const { tenantQuery, getTenantContext, pool } = require('../config/db');
 const logger = require('../lib/logger');
 
+// GET /api/laporan/jenisref-kartustok
+exports.getJenisRef = async (req, res) => {
+  try {
+    const ctx = getTenantContext();
+    const sql = `SELECT DISTINCT jenisref FROM kartustok WHERE idtenant = ? AND idlokasi = ? AND jenisref IS NOT NULL AND jenisref != '' ORDER BY jenisref`;
+    const rows = await tenantQuery(sql, [ctx.idtenant, ctx.idlokasi]);
+    res.json(rows.map(r => r.jenisref));
+  } catch (err) {
+    logger.error(err, { req });
+    res.status(500).json({ message: err.message });
+  }
+};
+
+
 // Helper: membuat klausa LIKE multi-value untuk filter (misal "A,B,C" -> kodelokasi LIKE '%A%' OR kodelokasi LIKE '%B%')
 function multiLike(column, raw) {
   const vals = raw.split(',').map(s => s.trim()).filter(Boolean);
@@ -26,18 +40,30 @@ function multiIdIn(column, raw) {
 
 
 
-// GET /api/laporan/sales-transaksi — Laporan detail transaksi penjualan (per item)
+/**
+ * GET /api/laporan/sales-transaksi
+ * Controller untuk menghasilkan laporan detail transaksi penjualan (per item).
+ * Mendukung format output JSON untuk API dan HTML untuk kebutuhan cetak (Print).
+ */
 exports.salesTransaksi = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const { tglwal, tglakhir, kodelokasi, namalokasi, kodecustomer, namacustomer, statusLunas } = req.query;
+    const { 
+      tglwal, tglakhir, kodelokasi, namalokasi, 
+      kodecustomer, namacustomer, statusLunas 
+    } = req.query;
+    
+    // Default format adalah JSON jika tidak secara eksplisit di-request 'html'
     const format = req.query.format || 'json';
 
+    // 1. PERSIAPAN BASE QUERY
+    // Mengambil data header penjualan, detail item, serta informasi pelunasan piutang jika ada.
     let sql = `
-    SELECT j.kodejual, j.tgltrans, l.namalokasi,
+    SELECT 
+      j.kodejual, j.tgltrans, l.namalokasi,
       c.kodecustomer, c.namacustomer,
       b.kodebarang, b.namabarang,
-      jdtl.jml, jdtl.satuan, jdtl.harga, jdtl.ppn, jdtl.subtotal, j.grandtotal,
+      jdtl.idjualdtl, jdtl.jml, jdtl.satuan, jdtl.harga, jdtl.ppn, jdtl.subtotal, j.grandtotal,
       pp.tgltrans AS tglpelunasan, kp.terbayar as amount, kp.sisa
     FROM jual j
       JOIN jualdtl jdtl ON j.idjual = jdtl.idjual AND jdtl.idtenant = j.idtenant
@@ -47,11 +73,19 @@ exports.salesTransaksi = async (req, res) => {
       LEFT JOIN kartupiutang kp ON kp.kodetrans = j.kodejual AND kp.jenis = 'JUAL'
       LEFT JOIN pelunasanpiutangdtl ppdtl ON ppdtl.kodetrans = kp.kodetrans
       LEFT JOIN pelunasanpiutang pp ON pp.idpelunasan = ppdtl.idpelunasan
-    WHERE j.status = 'AKTIF'`;
+    WHERE j.status IN ('AKTIF', 'LUNAS')`; // <-- [FIX]: Sesuaikan status karena di DB bernilai 'LUNAS'
+    
     const params = [];
 
-    if (tglwal) { sql += ' AND j.tgltrans >= ?'; params.push(tglwal); }
-    if (tglakhir) { sql += ' AND j.tgltrans <= ?'; params.push(tglakhir); }
+    // 2. TERAPKAN FILTER PENCARIAN (DYNAMIC QUERY)
+    if (tglwal) { 
+      sql += ' AND j.tgltrans >= ?'; 
+      params.push(tglwal); 
+    }
+    if (tglakhir) { 
+      sql += ' AND j.tgltrans <= ?'; 
+      params.push(tglakhir); 
+    }
 
     if (kodelokasi) {
       const { clause, params: p } = multiLike('l.kodelokasi', kodelokasi);
@@ -76,20 +110,24 @@ exports.salesTransaksi = async (req, res) => {
       sql += ' AND (kp.sisa > 0 OR kp.sisa IS NULL)';
     }
 
-    sql += 'GROUP BY jdtl.idbarang ORDER BY j.tgltrans DESC, j.kodejual DESC, jdtl.idjualdtl ASC';
+    // 3. GROUPING & SORTING
+    sql += ' GROUP BY jdtl.idjualdtl ORDER BY j.tgltrans DESC, j.kodejual DESC, jdtl.idjualdtl ASC';
 
+    // 4. EKSEKUSI QUERY
     const rows = await tenantQuery(sql, params);
 
-    // Grouping: menggabungkan item per kodejual ke dalam satu transaksi
+    // 5. FORMATTING: KELOMPOKKAN ITEM KE DALAM TRANSAKSI MASING-MASING
     const transactions = [];
     let currentKode = null;
     let currentGroup = null;
     const seenKodejual = new Set();
 
     for (const row of rows) {
+      // Jika kodejual beda dengan sebelumnya, buat grup parent transaksi baru
       if (row.kodejual !== currentKode) {
         currentKode = row.kodejual;
         const sisaVal = parseFloat(row.sisa) || 0;
+        
         currentGroup = {
           kodejual    : row.kodejual,
           tgltrans    : row.tgltrans,
@@ -100,12 +138,15 @@ exports.salesTransaksi = async (req, res) => {
           tglpelunasan: row.tglpelunasan,
           amount      : parseFloat(row.amount) || 0,
           sisa        : sisaVal,
-          statusLunas : sisaVal === 0 ? 'LUNAS'        : 'Belum Lunas',
-          items       : []
+          statusLunas : sisaVal <= 0 ? 'LUNAS' : 'Belum Lunas', // <-- [FIX]: Safety check untuk status lunas
+          items       : [] // Array untuk menampung baris detail barang
         };
+        
         transactions.push(currentGroup);
         seenKodejual.add(row.kodejual);
       }
+      
+      // Masukkan baris item/barang ke dalam parent transaksi saat ini
       currentGroup.items.push({
         kodebarang: row.kodebarang,
         namabarang: row.namabarang,
@@ -117,15 +158,19 @@ exports.salesTransaksi = async (req, res) => {
       });
     }
 
+    // Kalkulasi rekapitulasi data
     const totalTransaksi = seenKodejual.size;
     const totalPenjualan = transactions.reduce((sum, t) => sum + t.grandtotal, 0);
 
-    // Render HTML jika format=html diminta
+    // 6. TANGANI RESPONSE BERDASARKAN FORMAT YANG DIMINTA
     if (format === 'html') {
-      let sqlTenant = 'SELECT * FROM tenant WHERE idtenant = ?';
+      // Query tambahan untuk header cetakan (informasi toko/tenant)
+      const sqlTenant = 'SELECT * FROM tenant WHERE idtenant = ?';
       const [[tenant]] = await pool.query(sqlTenant, [ctx.idtenant]);
-      let sqlLokasi = 'SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?';
+      
+      const sqlLokasi = 'SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?';
       const [[lokasi]] = await pool.query(sqlLokasi, [ctx.idlokasi, ctx.idtenant]);
+      
       return res.render('laporan_sales_transaksi', {
         transactions,
         totalTransaksi,
@@ -145,13 +190,18 @@ exports.salesTransaksi = async (req, res) => {
       });
     }
 
-    res.json({ transactions, totalTransaksi, totalPenjualan });
+    // Response default (JSON) untuk dikonsumsi frontend (React/Vue/dsb)
+    return res.json({ transactions, totalTransaksi, totalPenjualan });
+
   } catch (err) {
-    logger.error(err, { req });
-    res.status(500).json({ message: err.message });
+    // Logging error yang informatif di sisi server
+    logger.error(`[API Laporan Sales Transaksi] Error: ${err.message}`, { req });
+    return res.status(500).json({ 
+      message: "Terjadi kesalahan server saat memuat laporan.",
+      error: err.message // Opsional: Hapus line ini di production agar aman
+    });
   }
 };
-
 // GET /api/laporan/sales-per-customer — Laporan penjualan dikelompokkan per customer
 exports.salesPerCustomer = async (req, res) => {
   try {

@@ -13,6 +13,7 @@ router.get('/pembelian-per-barang', auth, ctrl.pembelianPerBarang);
 router.get('/pembelian-rekap', auth, ctrl.pembelianRekap);
 router.get('/stok', auth, ctrl.stok);
 router.get('/kartu-stok', auth, ctrl.kartuStok);
+router.get('/jenisref-kartustok', auth, ctrl.getJenisRef);
 router.get('/rekap-sales', auth, ctrl.rekapSales);
 router.get('/struk/:id', auth, ctrl.struk);
 router.get('/faktur/:id', auth, ctrl.faktur);

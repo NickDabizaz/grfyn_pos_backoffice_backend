@@ -411,4 +411,28 @@ Untuk operasi read-only (GET), cukup gunakan `tenantQuery()` tanpa `getConnectio
 | `GET /impor/jual/export` | Export penjualan ke CSV |
 | `POST /impor/jual/import` | Import penjualan dari CSV |
 
-File diproses oleh multer ke direktori `uploads/`, lalu dibaca per baris.
+### 24. `produksiController.js` — Produksi
+
+**Route**: `GET/POST/PUT /api/produksi/...`
+
+| Method      | Endpoint                       | Keterangan |
+|------------|--------------------------------|------------|
+| `getAll`    | `GET /produksi`                | List transaksi produksi |
+| `getOne`    | `GET /produksi/:id`            | Detail produksi + items |
+| `checkEdit` | `GET /produksi/:id/check-edit` | Cek apakah bisa diedit/dicancel |
+| `create`    | `POST /produksi`               | Buat transaksi produksi baru |
+| `update`    | `PUT /produksi/:id`            | Edit produksi (hapus & buat ulang) |
+| `cancel`    | `PUT /produksi/:id/cancel`     | Batalkan produksi (void stok) |
+
+**Logika kartustok**:
+- `BAHAN BAKU` / `BAHAN SETENGAH JADI` → stok **keluar** (`jenis = 'K'`)
+- `BAHAN JADI` → stok **masuk** (`jenis = 'M'`)
+- `jenisbarang` selalu diambil dari master barang (`jenis` di tabel `barang`), bukan dari input client
+- `harga_satuan` di detail diambil dari harga beli terakhir (`hargabeli`) untuk keperluan HPP
+- Validasi stok bahan dilakukan sebelum produksi diproses
+
+**Warning — Integrasi HPP:**
+Produksi belum terintegrasi ke `hitunghppController`. Bahan baku yang keluar
+via produksi belum diperhitungkan dalam kalkulasi HPP periode (fungsi `calcHPPItem`
+hanya membaca dari `belidtl` dan `jualdtl`). Data `harga_satuan` dan `subtotal`
+di `produksidtl` sudah disiapkan untuk integrasi ini di fase berikutnya.
