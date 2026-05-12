@@ -7,5 +7,6 @@ router.post('/login', ctrl.login);
 router.post('/select-location', ctrl.selectLocation);
 router.get('/me', auth, ctrl.me);
 router.put('/password', auth, ctrl.changePassword);
+router.post('/refresh', auth, ctrl.refresh);
 
 module.exports = router;

@@ -5,6 +5,28 @@
 const { pool, getTenantContext } = require('../config/db');
 const logger = require('../lib/logger');
 
+// GET /api/menu/all — Mengambil semua menu (untuk user management)
+exports.getAll = async (req, res) => {
+  try {
+    const [menus] = await pool.query(
+      'SELECT * FROM menu ORDER BY urutan ASC'
+    );
+    function buildTree(items, parentId = null) {
+      return items
+        .filter(item => item.idparent === parentId)
+        .map(item => ({
+          ...item,
+          children: buildTree(items, item.idmenu),
+        }));
+    }
+    const tree = buildTree(menus);
+    res.json(tree);
+  } catch (err) {
+    logger.error(err, { req });
+    res.status(500).json({ message: err.message });
+  }
+};
+
 // GET /api/menu/my — Mengambil menu dalam bentuk tree sesuai user yang sedang login
 exports.myMenu = async (req, res) => {
   try {

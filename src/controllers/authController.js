@@ -323,3 +323,48 @@ exports.changePassword = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+// POST /auth/refresh — Menerbitkan token JWT baru tanpa perlu login ulang; untuk auto-refresh saat token mendekati expire
+exports.refresh = async (req, res) => {
+  try {
+    const ctx = getTenantContext();
+
+    // Validasi: cek user masih aktif (tokenversion sudah diverifikasi oleh auth middleware)
+    let sql = 'SELECT u.*, t.namatenant, t.ppn FROM user u JOIN tenant t ON u.idtenant = t.idtenant WHERE u.iduser = ? AND u.idtenant = ?';
+    const [rows] = await pool.query(sql, [ctx.iduser, ctx.idtenant]);
+    if (rows.length === 0 || rows[0].status !== 'AKTIF') {
+      return res.status(401).json({ message: 'Akun tidak aktif atau tidak ditemukan' });
+    }
+
+    const user = rows[0];
+    const token = jwt.sign(
+      {
+        iduser      : user.iduser,
+        idtenant    : user.idtenant,
+        idlokasi    : ctx.idlokasi,
+        kodelokasi  : ctx.kodelokasi,
+        namalokasi  : ctx.namalokasi,
+        tokenversion: user.tokenversion,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '2h' }
+    );
+
+    res.json({
+      token,
+      user: {
+        iduser    : user.iduser,
+        idtenant  : user.idtenant,
+        username  : user.username,
+        namauser  : user.namauser,
+        email     : user.email,
+        isowner   : user.isowner,
+        namatenant: user.namatenant,
+        ppn       : user.ppn,
+      },
+    });
+  } catch (err) {
+    logger.error(err, { req });
+    res.status(500).json({ message: err.message });
+  }
+};
