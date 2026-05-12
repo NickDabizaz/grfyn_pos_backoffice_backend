@@ -216,7 +216,7 @@ exports.salesPerCustomer = async (req, res) => {
       COALESCE(SUM(CASE WHEN kp.sisa <= 0 OR kp.sisa IS NULL THEN j.grandtotal ELSE 0 END), 0) as total_lunas,
       COALESCE(SUM(CASE WHEN kp.sisa > 0 THEN kp.sisa ELSE 0 END), 0) as total_piutang
     FROM customer c
-      LEFT JOIN jual j ON c.idcustomer = j.idcustomer AND j.idtenant = c.idtenant AND j.status = 'AKTIF'
+      LEFT JOIN jual j ON c.idcustomer = j.idcustomer AND j.idtenant = c.idtenant AND j.status IN ('AKTIF', 'LUNAS')
       LEFT JOIN kartupiutang kp ON kp.kodetrans = j.kodejual AND kp.jenis = 'JUAL'
     WHERE c.idtenant = ?`;
     const params = [ctx.idtenant];
@@ -296,7 +296,7 @@ exports.salesPerBarang = async (req, res) => {
         kp.sisa
       FROM barang b
         JOIN jualdtl jd ON b.idbarang = jd.idbarang AND b.idtenant = jd.idtenant
-        JOIN jual j ON jd.idjual = j.idjual AND j.idtenant = jd.idtenant AND j.status = 'AKTIF'
+        JOIN jual j ON jd.idjual = j.idjual AND j.idtenant = jd.idtenant AND j.status IN ('AKTIF', 'LUNAS')
         LEFT JOIN customer c ON j.idcustomer = c.idcustomer AND c.idtenant = j.idtenant
         LEFT JOIN lokasi l ON j.idlokasi = l.idlokasi AND l.idtenant = j.idtenant
         LEFT JOIN kartupiutang kp ON kp.kodetrans = j.kodejual AND kp.jenis = 'JUAL'
@@ -439,13 +439,74 @@ exports.pembelian = async (req, res) => {
     const totalPembelian = rows.reduce((sum, r) => sum + parseFloat(r.grandtotal || 0), 0);
 
     if (format === 'html') {
+      // Ambil detail item per transaksi pembelian
+      let sqlDetail = `
+        SELECT b.idbeli, b.kodebeli, b.tgltrans, b.grandtotal, b.bayar, b.status,
+          s.kodesupplier, s.namasupplier,
+          l.namalokasi,
+          bg.kodebarang, bg.namabarang, bg.satuankecil as satuan,
+          bd.idbeli as bd_idbeli, bd.jml, bd.harga, bd.ppn, bd.subtotal
+        FROM beli b
+          LEFT JOIN supplier s ON b.idsupplier = s.idsupplier AND s.idtenant = b.idtenant
+          LEFT JOIN lokasi l ON b.idlokasi = l.idlokasi AND l.idtenant = b.idtenant
+          LEFT JOIN belidtl bd ON b.idbeli = bd.idbeli AND bd.idtenant = b.idtenant
+          LEFT JOIN barang bg ON bd.idbarang = bg.idbarang AND bg.idtenant = b.idtenant
+        WHERE b.status <> 'VOID' AND b.idlokasi = ?`;
+      const detailParams = [ctx.idlokasi];
+      if (tglwal) { sqlDetail += ' AND b.tgltrans >= ?'; detailParams.push(tglwal); }
+      if (tglakhir) { sqlDetail += ' AND b.tgltrans <= ?'; detailParams.push(tglakhir); }
+      if (idsupplier) {
+        const { clause, params: p } = multiIdIn('b.idsupplier', idsupplier);
+        if (clause) { sqlDetail += ' AND ' + clause; detailParams.push(...p); }
+      }
+      sqlDetail += ' ORDER BY b.tgltrans DESC, b.idbeli DESC, bd.idbelidtl ASC';
+
+      const detailRows = await tenantQuery(sqlDetail, detailParams);
+
+      // Kelompokkan item ke dalam transaksi masing-masing
+      const transactions = [];
+      let currentKode = null;
+      let currentGroup = null;
+      for (const row of detailRows) {
+        if (row.kodebeli !== currentKode) {
+          currentKode = row.kodebeli;
+          const sisa = parseFloat(row.grandtotal || 0) - parseFloat(row.bayar || 0);
+          currentGroup = {
+            kodebeli    : row.kodebeli,
+            tgltrans    : row.tgltrans,
+            namalokasi  : row.namalokasi,
+            kodesupplier: row.kodesupplier,
+            namasupplier: row.namasupplier,
+            grandtotal  : parseFloat(row.grandtotal) || 0,
+            bayar       : parseFloat(row.bayar) || 0,
+            sisa        : sisa,
+            statusLunas : sisa <= 0 ? 'LUNAS' : 'Belum Lunas',
+            items       : []
+          };
+          transactions.push(currentGroup);
+        }
+        if (row.kodebarang) {
+          currentGroup.items.push({
+            kodebarang: row.kodebarang,
+            namabarang: row.namabarang,
+            jml       : row.jml,
+            satuan    : row.satuan,
+            harga     : parseFloat(row.harga) || 0,
+            ppn       : parseFloat(row.ppn) || 0,
+            subtotal  : parseFloat(row.subtotal) || 0
+          });
+        }
+      }
+
+      const totalTransaksi = transactions.length;
       let sqlTenant4 = 'SELECT * FROM tenant WHERE idtenant = ?';
       const [[tenant]] = await pool.query(sqlTenant4, [ctx.idtenant]);
+      const [[lokasi]] = await pool.query('SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?', [ctx.idlokasi, ctx.idtenant]);
       return res.render('laporan_pembelian', {
-        data    : rows,                              totalPembelian,
-        tglwal  : tglwal || '-',                     tglakhir      : tglakhir || '-',
+        transactions, totalTransaksi, totalPembelian,
+        tglwal  : tglwal || '-',   tglakhir: tglakhir || '-',
         namatoko: tenant?.namatenant || 'Grfyn POS',
-        alamat  : '',                                hp            : '',              logo: tenant?.logo || '',
+        alamat  : lokasi?.alamat || '', hp: lokasi?.hp || '', logo: tenant?.logo || '',
         tglcetak: new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' })
       });
     }
