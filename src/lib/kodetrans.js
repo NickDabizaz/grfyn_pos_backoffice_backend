@@ -168,6 +168,11 @@ async function generateKodeReturJual(conn, idtenant, idlokasi) {
   return generateKode(conn, 'RJ', idtenant, idlokasi, 'returjual', 'kodereturjual');
 }
 
+// Generate kode retur pembelian: format RB.KODELOKASI.YYMMDD.NNN
+async function generateKodeReturBeli(conn, idtenant, idlokasi) {
+  return generateKode(conn, 'RB', idtenant, idlokasi, 'returbeli', 'kodereturbeli');
+}
+
 // Generate kode tukar barang: format TB.KODELOKASI.YYMMDD.NNN
 async function generateKodeTukarBarang(conn, idtenant, idlokasi) {
   return generateKode(conn, 'TB', idtenant, idlokasi, 'tukarbarang', 'kodetukarbarang');
@@ -194,6 +199,7 @@ module.exports = {
   generateKodeMaster,
   generateKodeHitungHPP,
   generateKodeReturJual,
+  generateKodeReturBeli,
   generateKodeTukarBarang,
   generateKodePelunasanPiutang,
   generateKodePelunasanHutang,

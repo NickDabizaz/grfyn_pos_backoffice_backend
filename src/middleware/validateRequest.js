@@ -47,6 +47,20 @@ const returJualSchema = z.object({
   })).min(1, 'Minimal 1 item retur diperlukan'),
 });
 
+const returBeliSchema = z.object({
+  idsupplier: z.number().int().positive('idsupplier wajib diisi').optional().nullable(),
+  idbeli    : z.number().int().positive().optional().nullable(),
+  kodebeli  : z.string().optional().nullable(),
+  tgltrans  : z.string().optional(),
+  catatan   : z.string().optional(),
+  items     : z.array(z.object({
+    idbarang: z.number().int().positive('idbarang harus bilangan bulat positif'),
+    jml     : z.number().positive('jml retur harus > 0'),
+    harga   : z.number().nonnegative('harga tidak boleh negatif').optional().default(0),
+    satuan  : z.string().optional(),
+  })).min(1, 'Minimal 1 item retur diperlukan'),
+});
+
 function validate(schema) {
   return (req, res, next) => {
     const result = schema.safeParse(req.body);
@@ -66,4 +80,5 @@ module.exports = {
   validateJual    : validate(jualSchema),
   validateBeli    : validate(beliSchema),
   validateReturJual: validate(returJualSchema),
+  validateReturBeli: validate(returBeliSchema),
 };
