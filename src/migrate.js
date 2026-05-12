@@ -455,6 +455,47 @@ async function migrate() {
     ) ENGINE=InnoDB
   `);
 
+  // returbeli
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS returbeli (
+      idreturbeli   INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant      INT NOT NULL,
+      idlokasi      INT NOT NULL,
+      kodereturbeli VARCHAR(30) NOT NULL,
+      tgltrans      DATE NOT NULL,
+      idsupplier    INT DEFAULT NULL,
+      idbeli        INT DEFAULT NULL,
+      kodebeli      VARCHAR(30) DEFAULT NULL,
+      iduser        INT NOT NULL,
+      total         DECIMAL(15,2) DEFAULT 0,
+      catatan       TEXT DEFAULT NULL,
+      status        VARCHAR(20) DEFAULT 'AKTIF',
+      userentry     INT NOT NULL DEFAULT 0,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
+      FOREIGN KEY (idsupplier) REFERENCES supplier(idsupplier),
+      UNIQUE KEY uq_returbeli_kode (idtenant, idlokasi, kodereturbeli),
+      INDEX idx_returbeli_tgl (tgltrans)
+    ) ENGINE=InnoDB
+  `);
+
+  // returbelidtl
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS returbelidtl (
+      idreturbelidtl INT AUTO_INCREMENT PRIMARY KEY,
+      idreturbeli    INT NOT NULL,
+      idtenant       INT NOT NULL,
+      idbarang       INT NOT NULL,
+      satuan         VARCHAR(20) DEFAULT NULL,
+      jml            DECIMAL(15,3) NOT NULL,
+      harga          DECIMAL(15,2) DEFAULT 0,
+      subtotal       DECIMAL(15,2) NOT NULL,
+      FOREIGN KEY (idreturbeli) REFERENCES returbeli(idreturbeli) ON DELETE CASCADE,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idbarang) REFERENCES barang(idbarang)
+    ) ENGINE=InnoDB
+  `);
+
   // returjual
   await connection.query(`
     CREATE TABLE returjual (
