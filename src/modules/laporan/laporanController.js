@@ -203,40 +203,46 @@ exports.salesTransaksi = async (req, res) => {
   }
 };
 // GET /api/laporan/sales-per-customer — Laporan penjualan dikelompokkan per customer
+// GET /api/laporan/sales-per-customer — Laporan penjualan detail per customer
 exports.salesPerCustomer = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const { tglwal, tglakhir, kodelokasi, namalokasi, kodecustomer, namacustomer, statusLunas } = req.query;
+    const { 
+      tglwal, tglakhir, kodelokasi, namalokasi, 
+      kodecustomer, namacustomer, statusLunas 
+    } = req.query;
+    
     const format = req.query.format || 'json';
 
+    // 1. BASE QUERY (Ambil detail barang seperti sales transaksi)
     let sql = `
-    SELECT c.idcustomer, c.kodecustomer, c.namacustomer,
-      COUNT(DISTINCT j.kodejual) as total_transaksi,
-      COALESCE(SUM(j.grandtotal), 0) as total_penjualan,
-      COALESCE(SUM(CASE WHEN kp.sisa <= 0 OR kp.sisa IS NULL THEN j.grandtotal ELSE 0 END), 0) as total_lunas,
-      COALESCE(SUM(CASE WHEN kp.sisa > 0 THEN kp.sisa ELSE 0 END), 0) as total_piutang
-    FROM customer c
-      LEFT JOIN jual j ON c.idcustomer = j.idcustomer AND j.idtenant = c.idtenant AND j.status IN ('AKTIF', 'LUNAS')
+    SELECT 
+      j.kodejual, j.tgltrans, l.namalokasi,
+      c.kodecustomer, c.namacustomer,
+      b.kodebarang, b.namabarang,
+      jdtl.jml, jdtl.satuan, jdtl.harga, jdtl.ppn, jdtl.subtotal, j.grandtotal,
+      kp.terbayar as amount, kp.sisa
+    FROM jual j
+      JOIN jualdtl jdtl ON j.idjual = jdtl.idjual AND jdtl.idtenant = j.idtenant
+      JOIN lokasi l ON l.idlokasi = j.idlokasi AND l.idtenant = j.idtenant
+      JOIN customer c ON c.idcustomer = j.idcustomer AND c.idtenant = j.idtenant
+      JOIN barang b ON b.idbarang = jdtl.idbarang AND b.idtenant = j.idtenant
       LEFT JOIN kartupiutang kp ON kp.kodetrans = j.kodejual AND kp.jenis = 'JUAL'
-    WHERE c.idtenant = ?`;
+    WHERE j.idtenant = ? AND j.status IN ('AKTIF', 'LUNAS')`;
+
     const params = [ctx.idtenant];
 
+    // 2. FILTERING
     if (tglwal) { sql += ' AND j.tgltrans >= ?'; params.push(tglwal); }
     if (tglakhir) { sql += ' AND j.tgltrans <= ?'; params.push(tglakhir); }
 
     if (kodelokasi) {
-      sql += ` AND j.idlokasi IN (SELECT idlokasi FROM lokasi WHERE idtenant = c.idtenant AND (`;
-      const vals = kodelokasi.split(',').map(s => s.trim()).filter(Boolean);
-      sql += vals.map(() => 'kodelokasi LIKE ?').join(' OR ');
-      sql += '))';
-      vals.forEach(v => params.push(`%${v}%`));
+      const { clause, params: p } = multiLike('l.kodelokasi', kodelokasi);
+      if (clause) { sql += ' AND ' + clause; params.push(...p); }
     }
     if (namalokasi) {
-      sql += ` AND j.idlokasi IN (SELECT idlokasi FROM lokasi WHERE idtenant = c.idtenant AND (`;
-      const vals = namalokasi.split(',').map(s => s.trim()).filter(Boolean);
-      sql += vals.map(() => 'namalokasi LIKE ?').join(' OR ');
-      sql += '))';
-      vals.forEach(v => params.push(`%${v}%`));
+      const { clause, params: p } = multiLike('l.namalokasi', namalokasi);
+      if (clause) { sql += ' AND ' + clause; params.push(...p); }
     }
     if (kodecustomer) {
       const { clause, params: p } = multiLike('c.kodecustomer', kodecustomer);
@@ -248,32 +254,80 @@ exports.salesPerCustomer = async (req, res) => {
     }
 
     if (statusLunas === 'lunas') {
-      sql += ' AND kp.sisa <= 0';
+      sql += ' AND (kp.sisa <= 0 OR kp.sisa IS NULL)';
     } else if (statusLunas === 'belum') {
-      sql += ' AND (kp.sisa > 0 OR kp.sisa IS NULL)';
+      sql += ' AND kp.sisa > 0';
     }
 
-    sql += ' GROUP BY c.idcustomer, c.kodecustomer, c.namacustomer ORDER BY total_penjualan DESC';
+    // 3. SORTING (PENTING: Harus urut customer dulu baru kodejual)
+    sql += ' ORDER BY c.namacustomer ASC, j.tgltrans DESC, j.kodejual DESC, jdtl.idjualdtl ASC';
 
     const rows = await tenantQuery(sql, params);
-    const grandTotal = rows.reduce((sum, r) => sum + parseFloat(r.total_penjualan || 0), 0);
 
+    // 4. FORMATTING: Grouping Item ke dalam Transaksi
+    const transactions = [];
+    let currentKodejual = null;
+    let currentGroupTrx = null;
+
+    for (const row of rows) {
+      if (row.kodejual !== currentKodejual) {
+        currentKodejual = row.kodejual;
+        const sisaVal = parseFloat(row.sisa) || 0;
+
+        currentGroupTrx = {
+          kodejual    : row.kodejual,
+          tgltrans    : row.tgltrans,
+          namalokasi  : row.namalokasi,
+          kodecustomer: row.kodecustomer,
+          namacustomer: row.namacustomer,
+          grandtotal  : parseFloat(row.grandtotal) || 0,
+          amount      : parseFloat(row.amount) || 0,
+          sisa        : sisaVal,
+          statusLunas : sisaVal <= 0 ? 'LUNAS' : 'BELUM LUNAS',
+          items       : []
+        };
+        transactions.push(currentGroupTrx);
+      }
+
+      currentGroupTrx.items.push({
+        kodebarang: row.kodebarang,
+        namabarang: row.namabarang,
+        jml       : row.jml,
+        satuan    : row.satuan,
+        harga     : parseFloat(row.harga) || 0,
+        ppn       : parseFloat(row.ppn) || 0,
+        subtotal  : parseFloat(row.subtotal) || 0
+      });
+    }
+
+    // Hitung Grand Total Penjualan (Berdasarkan unique transaksi)
+    const totalPenjualan = transactions.reduce((sum, t) => sum + t.grandtotal, 0);
+
+    // 5. RESPONSE
     if (format === 'html') {
-      let sqlTenant2 = 'SELECT * FROM tenant WHERE idtenant = ?';
-      const [[tenant]] = await pool.query(sqlTenant2, [ctx.idtenant]);
+      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      const [[lokasi]] = await pool.query('SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?', [ctx.idlokasi, ctx.idtenant]);
+
       return res.render('laporan_sales_per_customer', {
-        data        : rows,                              grandTotal,
-        tglwal      : tglwal || '-',                     tglakhir    : tglakhir || '-',
+        transactions, // Data yang sudah di-group per transaksi
+        totalPenjualan,
+        tglwal      : tglwal || '-',
+        tglakhir    : tglakhir || '-',
         statusLunas : statusLunas || '',
-        kodelokasi  : kodelokasi || '',                  namalokasi  : namalokasi || '',
-        kodecustomer: kodecustomer || '',                namacustomer: namacustomer || '',
+        kodelokasi  : kodelokasi || '',
+        namalokasi  : namalokasi || '',
+        kodecustomer: kodecustomer || '',
+        namacustomer: namacustomer || '',
         namatoko    : tenant?.namatenant || 'Grfyn POS',
-        alamat      : '',                                hp          : '',                 logo: tenant?.logo || '',
+        alamat      : lokasi?.alamat || '',
+        hp          : lokasi?.hp || '',
+        logo        : tenant?.logo || '',
         tglcetak    : new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' })
       });
     }
 
-    res.json({ data: rows, grandTotal });
+    res.json({ transactions, totalPenjualan });
+
   } catch (err) {
     logger.error(err, { req });
     res.status(500).json({ message: err.message });
