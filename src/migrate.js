@@ -44,6 +44,7 @@ async function migrate() {
     'barang', 'supplier', 'customer',
     'akun',
     'menutemplate',
+    'config',
     'user', 'lokasi', 'tenant',
     'menu', 'currency',
     'users', 'historyprogram'
@@ -223,6 +224,20 @@ async function migrate() {
     ) ENGINE=InnoDB
   `);
 
+  // config
+  await connection.query(`
+    CREATE TABLE config (
+      idtenant INT NOT NULL,
+      modul    VARCHAR(50) NOT NULL,
+      config   VARCHAR(50) NOT NULL,
+      value    VARCHAR(100) DEFAULT NULL,
+      status   INT DEFAULT 1,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      PRIMARY KEY (idtenant, modul, config),
+      INDEX idx_config_tenant_modul (idtenant, modul)
+    ) ENGINE=InnoDB
+  `);
+
   // akun
   await connection.query(`
     CREATE TABLE akun (
@@ -390,7 +405,7 @@ async function migrate() {
       grandtotal  DECIMAL(15,2) DEFAULT 0,
       bayar       DECIMAL(15,2) DEFAULT 0,
       kembali     DECIMAL(15,2) DEFAULT 0,
-      jenis       VARCHAR(20) DEFAULT 'POS',
+      jenis       VARCHAR(20) DEFAULT 'JUAL',
       metodbayar  VARCHAR(20) DEFAULT 'TUNAI',
       status      VARCHAR(20) DEFAULT 'AKTIF',
       userentry   INT NOT NULL DEFAULT 0,
@@ -435,6 +450,7 @@ async function migrate() {
       iduser      INT NOT NULL,
       grandtotal  DECIMAL(15,2) DEFAULT 0,
       bayar       DECIMAL(15,2) DEFAULT 0,
+      jenistransaksi VARCHAR(30) NOT NULL DEFAULT 'BELI',
       status      VARCHAR(20) DEFAULT 'AKTIF',
       userentry   INT NOT NULL DEFAULT 0,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),

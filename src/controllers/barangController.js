@@ -35,20 +35,33 @@ exports.getAll = async (req, res) => {
 exports.browseBarang = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const { search } = req.query;
+    const { search, jenis, excludeJenis } = req.query;
     let sql = `SELECT b.*,
       (SELECT hargabeli FROM hargabeli WHERE idbarang = b.idbarang AND idtenant = ? ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1) as hargabeli_terbaru,
       (SELECT hargajual FROM hargajual WHERE idbarang = b.idbarang AND idtenant = ? ORDER BY tgltrans DESC, idhargajual DESC LIMIT 1) as hargajual_terbaru,
       COALESCE(SUM(CASE WHEN ks.jenis='M' THEN ks.jml ELSE -ks.jml END), 0) as stok
     FROM barang b
-    LEFT JOIN kartustok ks ON ks.idbarang = b.idbarang AND ks.idtenant = ?
-    WHERE b.status = 'AKTIF'`;
-    const params = [ctx.idtenant, ctx.idtenant, ctx.idtenant];
+    LEFT JOIN kartustok ks ON ks.idbarang = b.idbarang AND ks.idtenant = ? AND ks.idlokasi = ?
+    WHERE b.status = 'AKTIF' AND b.idtenant = ?`;
+    const params = [ctx.idtenant, ctx.idtenant, ctx.idtenant, ctx.idlokasi, ctx.idtenant];
     
     // Filter opsional: pencarian berdasarkan nama/kode barang
     if (search) {
       sql += ' AND (b.namabarang LIKE ? OR b.kodebarang LIKE ?)';
       params.push(`%${search}%`, `%${search}%`);
+    }
+    if (jenis) {
+      sql += ' AND b.jenis = ?';
+      params.push(String(jenis).toUpperCase());
+    }
+    if (excludeJenis) {
+      const normalizedExcludeJenis = String(excludeJenis).toUpperCase();
+      if (normalizedExcludeJenis === 'BARANG JADI' || normalizedExcludeJenis === 'BAHAN JADI') {
+        sql += " AND b.jenis NOT IN ('BARANG JADI', 'BAHAN JADI')";
+      } else {
+        sql += ' AND b.jenis <> ?';
+        params.push(normalizedExcludeJenis);
+      }
     }
     sql += ' GROUP BY b.idbarang ORDER BY b.kodebarang, b.namabarang';
     const rows = await tenantQuery(sql, params);

@@ -16,6 +16,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
+router.get('/toko', auth, ctrl.getToko);
 router.put('/toko', auth, ctrl.updateToko);
 router.put('/logo', auth, upload.single('logo'), ctrl.updateLogo);
 

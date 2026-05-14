@@ -13,36 +13,52 @@ exports.create = async (req, res) => {
   try {
     const ctx = getTenantContext();
     await conn.beginTransaction();
-    const { idcustomer, items_kembali, items_baru, catatan } = req.body;
+    const { idcustomer, idlokasi, items_kembali, items_baru, catatan } = req.body;
 
     // Validasi: kedua daftar barang harus diisi
-    if (!items_kembali || !items_kembali.length) return res.status(400).json({ message: 'Barang kembali tidak boleh kosong' });
-    if (!items_baru || !items_baru.length) return res.status(400).json({ message: 'Barang baru tidak boleh kosong' });
+    if (!items_kembali || !items_kembali.length) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Barang kembali tidak boleh kosong' });
+    }
+    if (!items_baru || !items_baru.length) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Barang baru tidak boleh kosong' });
+    }
+    if (!idcustomer) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Customer wajib dipilih' });
+    }
+    if (!idlokasi) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Lokasi wajib dipilih' });
+    }
 
     // Validasi tiap item barang kembali: tindaklanjut harus valid
     for (const item of items_kembali) {
       if (!VALID_TINDAKLANJUT.includes(item.tindaklanjut)) {
+        await conn.rollback();
         return res.status(400).json({ message: `tindaklanjut tidak valid: ${item.tindaklanjut}` });
       }
       if (item.tindaklanjut === 'MASUK_STOK_2ND' && !item.idbarang2nd) {
+        await conn.rollback();
         return res.status(400).json({ message: 'idbarang2nd wajib diisi untuk tindaklanjut MASUK_STOK_2ND' });
       }
     }
 
     // Generate kode tukar barang unik
-    const kodetukarbarang = await generateKodeTukarBarang(conn, ctx.idtenant, ctx.idlokasi);
+    const kodetukarbarang = await generateKodeTukarBarang(conn, ctx.idtenant, idlokasi);
     const tgltrans = req.body.tgltrans || new Date().toISOString().slice(0, 10);
 
     // Insert header tukarbarang
     let sql = 'INSERT INTO tukarbarang (idtenant, idlokasi, kodetukarbarang, tgltrans, idcustomer, iduser, catatan, status, userentry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
     await conn.query(sql,
-      [ctx.idtenant, ctx.idlokasi, kodetukarbarang, tgltrans, idcustomer || null, ctx.iduser, catatan || null, 'AKTIF', ctx.iduser]
+      [ctx.idtenant, idlokasi, kodetukarbarang, tgltrans, idcustomer, ctx.iduser, catatan || null, 'AKTIF', ctx.iduser]
     );
 
     // Ambil id header yang baru dibuat
     let sql2 = 'SELECT idtukarbarang FROM tukarbarang WHERE kodetukarbarang = ? AND idtenant = ? AND idlokasi = ?';
     const [[header]] = await conn.query(sql2,
-      [kodetukarbarang, ctx.idtenant, ctx.idlokasi]
+      [kodetukarbarang, ctx.idtenant, idlokasi]
     );
 
     // Simpan barang kembali ke detail + catat stok masuk sesuai tindaklanjut
@@ -57,12 +73,12 @@ exports.create = async (req, res) => {
       if (item.tindaklanjut === 'MASUK_STOK') {
         let sql4 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         await conn.query(sql4,
-          [ctx.idtenant, ctx.idlokasi, kodetukarbarang, item.idbarang, item.jml, 'M', tgltrans, `Tukar Barang Kembali ${kodetukarbarang}`, header.idtukarbarang, 'tukarbarang']
+          [ctx.idtenant, idlokasi, kodetukarbarang, item.idbarang, item.jml, 'M', tgltrans, `Tukar Barang Kembali ${kodetukarbarang}`, header.idtukarbarang, 'tukarbarang']
         );
       } else if (item.tindaklanjut === 'MASUK_STOK_2ND') {
         let sql5 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         await conn.query(sql5,
-          [ctx.idtenant, ctx.idlokasi, kodetukarbarang, item.idbarang2nd, item.jml, 'M', tgltrans, `Tukar Barang Kembali 2nd ${kodetukarbarang}`, header.idtukarbarang, 'tukarbarang']
+          [ctx.idtenant, idlokasi, kodetukarbarang, item.idbarang2nd, item.jml, 'M', tgltrans, `Tukar Barang Kembali 2nd ${kodetukarbarang}`, header.idtukarbarang, 'tukarbarang']
         );
       }
       // HANGUS: tidak ada pergerakan stok — barang dianggap rusak/hilang
@@ -79,12 +95,12 @@ exports.create = async (req, res) => {
 
       let sql7 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
       await conn.query(sql7,
-        [ctx.idtenant, ctx.idlokasi, kodetukarbarang, item.idbarang, item.jml, 'K', tgltrans, `Tukar Barang Baru ${kodetukarbarang}`, header.idtukarbarang, 'tukarbarang']
+        [ctx.idtenant, idlokasi, kodetukarbarang, item.idbarang, item.jml, 'K', tgltrans, `Tukar Barang Baru ${kodetukarbarang}`, header.idtukarbarang, 'tukarbarang']
       );
     }
 
     await conn.commit();
-    await logger.history('TUKARBARANG_CREATE', { idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser, ref: kodetukarbarang, req });
+    await logger.history('TUKARBARANG_CREATE', { idtenant: ctx.idtenant, idlokasi, iduser: ctx.iduser, ref: kodetukarbarang, req });
     res.status(201).json({ message: 'Tukar barang berhasil dibuat', kodetukarbarang, idtukarbarang: header.idtukarbarang });
   } catch (err) {
     await conn.rollback();
@@ -99,12 +115,13 @@ exports.create = async (req, res) => {
 exports.getAll = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const { tglwal, tglakhir, idcustomer, search } = req.query;
+    const { tglwal, tglakhir, idcustomer, idlokasi, search } = req.query;
     let sql = `SELECT t.*, c.namacustomer
       FROM tukarbarang t
       LEFT JOIN customer c ON t.idcustomer = c.idcustomer AND c.idtenant = t.idtenant
-      WHERE t.idlokasi = ?`;
-    const params = [ctx.idlokasi];
+      WHERE t.idtenant = ?`;
+    const params = [ctx.idtenant];
+    if (idlokasi) { sql += ' AND t.idlokasi = ?'; params.push(idlokasi); }
     if (tglwal) { sql += ' AND t.tgltrans >= ?'; params.push(tglwal); }
     if (tglakhir) { sql += ' AND t.tgltrans <= ?'; params.push(tglakhir); }
     if (idcustomer) { sql += ' AND t.idcustomer = ?'; params.push(idcustomer); }
@@ -125,8 +142,8 @@ exports.getOne = async (req, res) => {
     let sql = `SELECT t.*, c.namacustomer
       FROM tukarbarang t
       LEFT JOIN customer c ON t.idcustomer = c.idcustomer AND c.idtenant = t.idtenant
-      WHERE t.idtukarbarang = ? AND t.idlokasi = ?`;
-    const rows = await tenantQuery(sql, [req.params.id, ctx.idlokasi]);
+      WHERE t.idtukarbarang = ? AND t.idtenant = ?`;
+    const rows = await tenantQuery(sql, [req.params.id, ctx.idtenant]);
     if (rows.length === 0) return res.status(404).json({ message: 'Tukar barang tidak ditemukan' });
 
     let sql2 = `SELECT tk.*, b.namabarang, b.satuankecil,
@@ -159,14 +176,20 @@ exports.cancel = async (req, res) => {
     const { id } = req.params;
 
     // Cek keberadaan dan status transaksi
-    let sql = 'SELECT * FROM tukarbarang WHERE idtukarbarang = ? AND idtenant = ? AND idlokasi = ?';
-    const [[tukar]] = await conn.query(sql, [id, ctx.idtenant, ctx.idlokasi]);
-    if (!tukar) return res.status(404).json({ message: 'Tukar barang tidak ditemukan' });
-    if (tukar.status === 'VOID') return res.status(400).json({ message: 'Transaksi sudah dibatalkan' });
+    let sql = 'SELECT * FROM tukarbarang WHERE idtukarbarang = ? AND idtenant = ?';
+    const [[tukar]] = await conn.query(sql, [id, ctx.idtenant]);
+    if (!tukar) {
+      await conn.rollback();
+      return res.status(404).json({ message: 'Tukar barang tidak ditemukan' });
+    }
+    if (tukar.status === 'VOID') {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Transaksi sudah dibatalkan' });
+    }
 
     // Ubah status menjadi VOID
     let sql2 = 'UPDATE tukarbarang SET status = ? WHERE idtukarbarang = ? AND idtenant = ? AND idlokasi = ?';
-    await conn.query(sql2, ['VOID', id, ctx.idtenant, ctx.idlokasi]);
+    await conn.query(sql2, ['VOID', id, ctx.idtenant, tukar.idlokasi]);
 
     const today = new Date().toISOString().slice(0, 10);
 
@@ -177,12 +200,12 @@ exports.cancel = async (req, res) => {
       if (dtl.tindaklanjut === 'MASUK_STOK') {
         let sql4 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         await conn.query(sql4,
-          [ctx.idtenant, ctx.idlokasi, `VOID-${tukar.kodetukarbarang}`, dtl.idbarang, dtl.jml, 'K', today, `Batal Tukar Barang ${tukar.kodetukarbarang}`, tukar.idtukarbarang, 'tukarbarang_void']
+          [ctx.idtenant, tukar.idlokasi, `VOID-${tukar.kodetukarbarang}`, dtl.idbarang, dtl.jml, 'K', today, `Batal Tukar Barang ${tukar.kodetukarbarang}`, tukar.idtukarbarang, 'tukarbarang_void']
         );
       } else if (dtl.tindaklanjut === 'MASUK_STOK_2ND' && dtl.idbarang2nd) {
         let sql5 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         await conn.query(sql5,
-          [ctx.idtenant, ctx.idlokasi, `VOID-${tukar.kodetukarbarang}`, dtl.idbarang2nd, dtl.jml, 'K', today, `Batal Tukar Barang 2nd ${tukar.kodetukarbarang}`, tukar.idtukarbarang, 'tukarbarang_void']
+          [ctx.idtenant, tukar.idlokasi, `VOID-${tukar.kodetukarbarang}`, dtl.idbarang2nd, dtl.jml, 'K', today, `Batal Tukar Barang 2nd ${tukar.kodetukarbarang}`, tukar.idtukarbarang, 'tukarbarang_void']
         );
       }
     }
@@ -193,12 +216,12 @@ exports.cancel = async (req, res) => {
     for (const dtl of itemsBaru) {
       let sql7 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
       await conn.query(sql7,
-        [ctx.idtenant, ctx.idlokasi, `VOID-${tukar.kodetukarbarang}`, dtl.idbarang, dtl.jml, 'M', today, `Batal Tukar Barang Baru ${tukar.kodetukarbarang}`, tukar.idtukarbarang, 'tukarbarang_void']
+        [ctx.idtenant, tukar.idlokasi, `VOID-${tukar.kodetukarbarang}`, dtl.idbarang, dtl.jml, 'M', today, `Batal Tukar Barang Baru ${tukar.kodetukarbarang}`, tukar.idtukarbarang, 'tukarbarang_void']
       );
     }
 
     await conn.commit();
-    await logger.history('TUKARBARANG_CANCEL', { idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser, ref: tukar.kodetukarbarang, req });
+    await logger.history('TUKARBARANG_CANCEL', { idtenant: ctx.idtenant, idlokasi: tukar.idlokasi, iduser: ctx.iduser, ref: tukar.kodetukarbarang, req });
     res.json({ message: 'Tukar barang berhasil dibatalkan' });
   } catch (err) {
     await conn.rollback();

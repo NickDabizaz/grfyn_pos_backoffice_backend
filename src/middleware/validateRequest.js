@@ -10,7 +10,8 @@ const itemSchema = z.object({
 });
 
 const jualSchema = z.object({
-  idcustomer: z.number().int().positive().optional().nullable(),
+  idcustomer: z.number({ required_error: 'customer wajib dipilih' }).int().positive('customer wajib dipilih'),
+  idlokasi   : z.number({ required_error: 'lokasi wajib dipilih' }).int().positive('lokasi wajib dipilih'),
   bayar      : z.number().nonnegative('bayar tidak boleh negatif').optional().default(0),
   metodbayar : z.string().optional(),
   jenis      : z.string().optional(),
@@ -21,22 +22,30 @@ const jualSchema = z.object({
 });
 
 const beliSchema = z.object({
-  idsupplier : z.number().int().positive('idsupplier wajib diisi').optional().nullable(),
+  kodebeli   : z.string().optional().nullable(),
+  idlokasi   : z.number({ required_error: 'lokasi wajib dipilih' }).int().positive('lokasi wajib dipilih'),
+  idsupplier : z.number({ required_error: 'supplier wajib dipilih' }).int().positive('supplier wajib dipilih'),
   bayar      : z.number().nonnegative('bayar tidak boleh negatif').optional().default(0),
   metodbayar : z.string().optional(),
   tgltrans   : z.string().optional(),
   useppn     : z.boolean().optional(),
+  langsung_lunas: z.boolean().optional(),
   items      : z.array(z.object({
     idbarang : z.number().int().positive('idbarang harus bilangan bulat positif'),
     jml      : z.number().int().positive('jml harus bilangan bulat > 0'),
     harga    : z.number().nonnegative('harga tidak boleh negatif'),
     satuan   : z.string().optional(),
     diskon   : z.number().min(0).max(100).optional().default(0),
+    ppn_mode : z.string().optional(),
   })).min(1, 'Minimal 1 item diperlukan'),
 });
 
 const returJualSchema = z.object({
-  idjual    : z.number().int().positive('idjual wajib diisi'),
+  idcustomer: z.number({ required_error: 'customer wajib dipilih' }).int().positive('customer wajib dipilih'),
+  idlokasi  : z.number({ required_error: 'lokasi wajib dipilih' }).int().positive('lokasi wajib dipilih'),
+  idjual    : z.number().int().positive('idjual wajib diisi').optional().nullable(),
+  kodejual  : z.string().optional().nullable(),
+  catatan   : z.string().optional().nullable(),
   tgltrans  : z.string().optional(),
   keterangan: z.string().optional(),
   items     : z.array(z.object({
@@ -44,11 +53,14 @@ const returJualSchema = z.object({
     jml      : z.number().int().positive('jml retur harus bilangan bulat > 0'),
     harga    : z.number().nonnegative().optional(),
     satuan   : z.string().optional(),
+    tindaklanjut: z.string().optional(),
+    idbarang2nd : z.number().int().positive().optional().nullable(),
   })).min(1, 'Minimal 1 item retur diperlukan'),
 });
 
 const returBeliSchema = z.object({
-  idsupplier: z.number().int().positive('idsupplier wajib diisi').optional().nullable(),
+  idsupplier: z.number({ required_error: 'supplier wajib dipilih' }).int().positive('supplier wajib dipilih'),
+  idlokasi  : z.number({ required_error: 'lokasi wajib dipilih' }).int().positive('lokasi wajib dipilih'),
   idbeli    : z.number().int().positive().optional().nullable(),
   kodebeli  : z.string().optional().nullable(),
   tgltrans  : z.string().optional(),

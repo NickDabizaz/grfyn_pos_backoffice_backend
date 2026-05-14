@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const { pool, getConnection, tenantQuery, tenantExecute, getTenantContext } = require('../config/db');
 require('dotenv').config();
 const logger = require('../lib/logger');
+const { setConfigValue } = require('../lib/confighelper');
 
 const DEFAULT_COA = [
   ['1-1001', 'Kas Tunai',               'ASET',        'DEBET'],
@@ -21,6 +22,44 @@ const DEFAULT_COA = [
   ['5-1002', 'Beban Operasional',       'BEBAN',       'DEBET'],
   ['5-1003', 'Beban Gaji',              'BEBAN',       'DEBET'],
 ];
+
+function signLoginToken(user, loc) {
+  return jwt.sign(
+    {
+      iduser      : user.iduser,
+      idtenant    : user.idtenant,
+      idlokasi    : loc.idlokasi,
+      kodelokasi  : loc.kodelokasi,
+      namalokasi  : loc.namalokasi,
+      tokenversion: user.tokenversion,
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: '2h' }
+  );
+}
+
+function buildLoginResponse(user, loc, token) {
+  return {
+    token,
+    user: {
+      iduser    : user.iduser,
+      idtenant  : user.idtenant,
+      username  : user.username,
+      namauser  : user.namauser,
+      email     : user.email,
+      isowner   : user.isowner,
+      namatenant: user.namatenant,
+      logo      : user.tenant_logo,
+      ppn       : user.ppn,
+    },
+    lokasi: {
+      idlokasi  : loc.idlokasi,
+      kodelokasi: loc.kodelokasi,
+      namalokasi: loc.namalokasi,
+    },
+    needSelectLocation: false,
+  };
+}
 
 // POST /auth/login — Login user; jika hanya 1 lokasi langsung dapat token, jika banyak pilih lokasi dulu
 exports.login = async (req, res) => {
@@ -48,66 +87,11 @@ exports.login = async (req, res) => {
     // Validasi: user harus punya minimal 1 lokasi
     if (lokasi.length === 0) return res.status(401).json({ message: 'Tidak ada lokasi yang di-assign' });
 
-    // Jika hanya 1 lokasi, langsung generate JWT token
-    if (lokasi.length === 1) {
-      const loc = lokasi[0];
-      const token = jwt.sign(
-        {
-          iduser      : user.iduser,
-          idtenant    : user.idtenant,
-          idlokasi    : loc.idlokasi,
-          kodelokasi  : loc.kodelokasi,
-          namalokasi  : loc.namalokasi,
-          tokenversion: user.tokenversion, // Untuk invalidasi token saat password direset
-        },
-        process.env.JWT_SECRET,
-        { expiresIn: '2h' }
-      );
+    const loc = lokasi.find(l => Number(l.isdefault) === 1) || lokasi[0];
+    const token = signLoginToken(user, loc);
 
-      await logger.history('LOGIN', { idtenant: user.idtenant, iduser: user.iduser, ref: username, req });
-      return res.json({
-        token,
-        user: {
-          iduser    : user.iduser,
-          idtenant  : user.idtenant,
-          username  : user.username,
-          namauser  : user.namauser,
-          email     : user.email,
-          isowner   : user.isowner,
-          namatenant: user.namatenant,
-          logo      : user.tenant_logo,
-          ppn       : user.ppn, // Persentase PPN tenant
-        },
-        lokasi: {
-          idlokasi  : loc.idlokasi,
-          kodelokasi: loc.kodelokasi,
-          namalokasi: loc.namalokasi,
-        },
-        needSelectLocation: false,
-      });
-    }
-
-    // Jika banyak lokasi, kembalikan daftar lokasi untuk dipilih user
-    return res.json({
-      needSelectLocation: true,
-      username          : user.username,
-      user              : {
-        iduser    : user.iduser,
-        idtenant  : user.idtenant,
-        username  : user.username,
-        namauser  : user.namauser,
-        email     : user.email,
-        isowner   : user.isowner,
-        namatenant: user.namatenant,
-        logo      : user.tenant_logo,
-      },
-      locations: lokasi.map(l => ({
-        idlokasi  : l.idlokasi,
-        kodelokasi: l.kodelokasi,
-        namalokasi: l.namalokasi,
-        alamat    : l.alamat,
-      })),
-    });
+    await logger.history('LOGIN', { idtenant: user.idtenant, idlokasi: loc.idlokasi, iduser: user.iduser, ref: username, req });
+    return res.json(buildLoginResponse(user, loc, token));
   } catch (err) {
     logger.error(err, { req });
     res.status(500).json({ message: err.message });
@@ -231,6 +215,8 @@ exports.register = async (req, res) => {
         [idtenant, kode, nama, jenis, saldo, 'AKTIF', 0]
       );
     }
+
+    await setConfigValue(conn, idtenant, 'GLOBAL', 'CEKMINUS', 'TIDAK', 1);
 
     await conn.commit();
 

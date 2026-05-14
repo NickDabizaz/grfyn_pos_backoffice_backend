@@ -8,22 +8,33 @@ exports.create = async (req, res) => {
   try {
     const ctx = getTenantContext();
     await conn.beginTransaction();
-    const { idsupplier, idbeli, kodebeli, items, catatan, tgltrans } = req.body;
+    const { idsupplier, idlokasi, idbeli, kodebeli, items, catatan, tgltrans } = req.body;
 
-    if (!items || !items.length) return res.status(400).json({ message: 'Items tidak boleh kosong' });
+    if (!items || !items.length) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Items tidak boleh kosong' });
+    }
+    if (!idsupplier) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Supplier wajib dipilih' });
+    }
+    if (!idlokasi) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Lokasi wajib dipilih' });
+    }
 
-    const kodereturbeli = await generateKodeReturBeli(conn, ctx.idtenant, ctx.idlokasi);
+    const kodereturbeli = await generateKodeReturBeli(conn, ctx.idtenant, idlokasi);
     const tgl = tgltrans || new Date().toISOString().slice(0, 10);
 
     // Insert header returbeli
     let sql = 'INSERT INTO returbeli (idtenant, idlokasi, kodereturbeli, tgltrans, idsupplier, idbeli, kodebeli, iduser, total, catatan, status, userentry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)';
     await conn.query(sql,
-      [ctx.idtenant, ctx.idlokasi, kodereturbeli, tgl, idsupplier || null, idbeli || null, kodebeli || null, ctx.iduser, catatan || null, 'AKTIF', ctx.iduser]
+      [ctx.idtenant, idlokasi, kodereturbeli, tgl, idsupplier, idbeli || null, kodebeli || null, ctx.iduser, catatan || null, 'AKTIF', ctx.iduser]
     );
 
     let [[header]] = await conn.query(
       'SELECT idreturbeli FROM returbeli WHERE kodereturbeli = ? AND idtenant = ? AND idlokasi = ?',
-      [kodereturbeli, ctx.idtenant, ctx.idlokasi]
+      [kodereturbeli, ctx.idtenant, idlokasi]
     );
 
     let calculatedTotal = 0;
@@ -41,7 +52,7 @@ exports.create = async (req, res) => {
       // Stok keluar: barang dikembalikan ke supplier → kurangi stok
       await conn.query(
         'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [ctx.idtenant, ctx.idlokasi, kodereturbeli, item.idbarang, item.jml, 'K', tgl, `Retur Pembelian ${kodereturbeli}`, header.idreturbeli, 'returbeli']
+        [ctx.idtenant, idlokasi, kodereturbeli, item.idbarang, item.jml, 'K', tgl, `Retur Pembelian ${kodereturbeli}`, header.idreturbeli, 'returbeli']
       );
     }
 
@@ -55,12 +66,12 @@ exports.create = async (req, res) => {
     if (kodebeli && idsupplier) {
       await conn.query(
         'INSERT INTO kartuhutang (idtenant, idlokasi, idsupplier, kodetrans, jenis, kodetransreferensi, amount, terbayar, sisa, tgltrans, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [ctx.idtenant, ctx.idlokasi, idsupplier, kodebeli, 'RETUR', kodereturbeli, -calculatedTotal, 0, -calculatedTotal, tgl, 'OPEN']
+        [ctx.idtenant, idlokasi, idsupplier, kodebeli, 'RETUR', kodereturbeli, -calculatedTotal, 0, -calculatedTotal, tgl, 'OPEN']
       );
     }
 
     await conn.commit();
-    await logger.history('RETURBELI_CREATE', { idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser, ref: kodereturbeli, detail: { total: calculatedTotal }, req });
+    await logger.history('RETURBELI_CREATE', { idtenant: ctx.idtenant, idlokasi, iduser: ctx.iduser, ref: kodereturbeli, detail: { total: calculatedTotal }, req });
     res.status(201).json({ message: 'Retur pembelian berhasil dibuat', kodereturbeli, idreturbeli: header.idreturbeli, total: calculatedTotal });
   } catch (err) {
     await conn.rollback();
@@ -75,12 +86,13 @@ exports.create = async (req, res) => {
 exports.getAll = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const { tglwal, tglakhir, idsupplier, search } = req.query;
+    const { tglwal, tglakhir, idsupplier, idlokasi, search } = req.query;
     let sql = `SELECT r.*, s.namasupplier
       FROM returbeli r
       LEFT JOIN supplier s ON r.idsupplier = s.idsupplier AND s.idtenant = r.idtenant
-      WHERE r.idlokasi = ?`;
-    const params = [ctx.idlokasi];
+      WHERE r.idtenant = ?`;
+    const params = [ctx.idtenant];
+    if (idlokasi)    { sql += ' AND r.idlokasi = ?'; params.push(idlokasi); }
     if (tglwal)      { sql += ' AND r.tgltrans >= ?'; params.push(tglwal); }
     if (tglakhir)    { sql += ' AND r.tgltrans <= ?'; params.push(tglakhir); }
     if (idsupplier)  { sql += ' AND r.idsupplier = ?'; params.push(idsupplier); }
@@ -101,8 +113,8 @@ exports.getOne = async (req, res) => {
     let sql = `SELECT r.*, s.namasupplier
       FROM returbeli r
       LEFT JOIN supplier s ON r.idsupplier = s.idsupplier AND s.idtenant = r.idtenant
-      WHERE r.idreturbeli = ? AND r.idlokasi = ?`;
-    const rows = await tenantQuery(sql, [req.params.id, ctx.idlokasi]);
+      WHERE r.idreturbeli = ? AND r.idtenant = ?`;
+    const rows = await tenantQuery(sql, [req.params.id, ctx.idtenant]);
     if (rows.length === 0) return res.status(404).json({ message: 'Retur pembelian tidak ditemukan' });
 
     let sql2 = `SELECT rd.*, b.namabarang, b.satuankecil
@@ -126,21 +138,27 @@ exports.cancel = async (req, res) => {
     const { id } = req.params;
 
     let [[retur]] = await conn.query(
-      'SELECT * FROM returbeli WHERE idreturbeli = ? AND idtenant = ? AND idlokasi = ?',
-      [id, ctx.idtenant, ctx.idlokasi]
+      'SELECT * FROM returbeli WHERE idreturbeli = ? AND idtenant = ?',
+      [id, ctx.idtenant]
     );
-    if (!retur) return res.status(404).json({ message: 'Retur pembelian tidak ditemukan' });
-    if (retur.status === 'VOID') return res.status(400).json({ message: 'Retur pembelian sudah dibatalkan' });
+    if (!retur) {
+      await conn.rollback();
+      return res.status(404).json({ message: 'Retur pembelian tidak ditemukan' });
+    }
+    if (retur.status === 'VOID') {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Retur pembelian sudah dibatalkan' });
+    }
 
     await conn.query(
       'UPDATE returbeli SET status = ? WHERE idreturbeli = ? AND idtenant = ? AND idlokasi = ?',
-      ['VOID', id, ctx.idtenant, ctx.idlokasi]
+      ['VOID', id, ctx.idtenant, retur.idlokasi]
     );
 
     // Hapus catatan hutang retur terkait
     await conn.query(
       "DELETE FROM kartuhutang WHERE kodetransreferensi = ? AND idtenant = ? AND idlokasi = ? AND jenis = 'RETUR'",
-      [retur.kodereturbeli, ctx.idtenant, ctx.idlokasi]
+      [retur.kodereturbeli, ctx.idtenant, retur.idlokasi]
     );
 
     const [details] = await conn.query(
@@ -153,12 +171,12 @@ exports.cancel = async (req, res) => {
     for (const dtl of details) {
       await conn.query(
         'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [ctx.idtenant, ctx.idlokasi, `VOID-${retur.kodereturbeli}`, dtl.idbarang, dtl.jml, 'M', today, `Batal Retur Beli ${retur.kodereturbeli}`, retur.idreturbeli, 'returbeli_void']
+        [ctx.idtenant, retur.idlokasi, `VOID-${retur.kodereturbeli}`, dtl.idbarang, dtl.jml, 'M', today, `Batal Retur Beli ${retur.kodereturbeli}`, retur.idreturbeli, 'returbeli_void']
       );
     }
 
     await conn.commit();
-    await logger.history('RETURBELI_CANCEL', { idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser, ref: retur.kodereturbeli, req });
+    await logger.history('RETURBELI_CANCEL', { idtenant: ctx.idtenant, idlokasi: retur.idlokasi, iduser: ctx.iduser, ref: retur.kodereturbeli, req });
     res.json({ message: 'Retur pembelian berhasil dibatalkan' });
   } catch (err) {
     await conn.rollback();

@@ -6,11 +6,12 @@ const logger = require('../lib/logger');
 exports.getAll = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const { tglwal, tglakhir, idsupplier } = req.query;
+    const { tglwal, tglakhir, idsupplier, idlokasi } = req.query;
     let sql = `SELECT g.*, s.namasupplier FROM grn g
       LEFT JOIN supplier s ON g.idsupplier = s.idsupplier AND s.idtenant = g.idtenant
-      WHERE g.idlokasi = ?`;
-    const params = [ctx.idlokasi];
+      WHERE g.idtenant = ?`;
+    const params = [ctx.idtenant];
+    if (idlokasi) { sql += ' AND g.idlokasi = ?'; params.push(idlokasi); }
     if (tglwal) { sql += ' AND g.tgltrans >= ?'; params.push(tglwal); }
     if (tglakhir) { sql += ' AND g.tgltrans <= ?'; params.push(tglakhir); }
     if (idsupplier) { sql += ' AND g.idsupplier = ?'; params.push(idsupplier); }
@@ -30,8 +31,8 @@ exports.getOne = async (req, res) => {
     const rows = await tenantQuery(
       `SELECT g.*, s.namasupplier FROM grn g
        LEFT JOIN supplier s ON g.idsupplier = s.idsupplier AND s.idtenant = g.idtenant
-       WHERE g.idgrn = ? AND g.idlokasi = ?`,
-      [req.params.id, ctx.idlokasi]
+       WHERE g.idgrn = ? AND g.idtenant = ?`,
+      [req.params.id, ctx.idtenant]
     );
     if (!rows.length) return res.status(404).json({ message: 'GRN tidak ditemukan' });
 
@@ -53,12 +54,14 @@ exports.create = async (req, res) => {
   const conn = await getConnection();
   try {
     const ctx = getTenantContext();
-    const { idsupplier, idpo, tgltrans, items, catatan } = req.body;
+    const { idsupplier, idlokasi, idpo, tgltrans, items, catatan } = req.body;
 
     if (!items || !items.length) return res.status(400).json({ message: 'Items tidak boleh kosong' });
+    if (!idsupplier) return res.status(400).json({ message: 'Supplier wajib dipilih' });
+    if (!idlokasi) return res.status(400).json({ message: 'Lokasi wajib dipilih' });
 
-    const kodegrn = await generateKodeGRN(conn, ctx.idtenant, ctx.idlokasi);
-    const kodebeli = await generateKodeBeli(conn, ctx.idtenant, ctx.idlokasi);
+    const kodegrn = await generateKodeGRN(conn, ctx.idtenant, idlokasi);
+    const kodebeli = await generateKodeBeli(conn, ctx.idtenant, idlokasi);
     const tgl = tgltrans || new Date().toISOString().slice(0, 10);
 
     await conn.beginTransaction();
@@ -67,7 +70,7 @@ exports.create = async (req, res) => {
     const [grnResult] = await conn.query(
       `INSERT INTO grn (idtenant, idlokasi, kodegrn, tgltrans, idpo, idsupplier, iduser, grandtotal, catatan, status, userentry, tglentry)
        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 'AKTIF', ?, NOW())`,
-      [ctx.idtenant, ctx.idlokasi, kodegrn, tgl, idpo || null, idsupplier || null, ctx.iduser, catatan || null, ctx.iduser]
+      [ctx.idtenant, idlokasi, kodegrn, tgl, idpo || null, idsupplier, ctx.iduser, catatan || null, ctx.iduser]
     );
     const idgrn = grnResult.insertId;
 
@@ -75,7 +78,7 @@ exports.create = async (req, res) => {
     const [beliResult] = await conn.query(
       `INSERT INTO beli (idtenant, idlokasi, kodebeli, tgltrans, idsupplier, iduser, grandtotal, bayar, status, userentry)
        VALUES (?, ?, ?, ?, ?, ?, 0, 0, 'AKTIF', ?)`,
-      [ctx.idtenant, ctx.idlokasi, kodebeli, tgl, idsupplier || null, ctx.iduser, ctx.iduser]
+      [ctx.idtenant, idlokasi, kodebeli, tgl, idsupplier, ctx.iduser, ctx.iduser]
     );
     const idbeli = beliResult.insertId;
 
@@ -93,7 +96,7 @@ exports.create = async (req, res) => {
       await conn.query(
         `INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref)
          VALUES (?, ?, ?, ?, ?, 'M', ?, ?, ?, 'grn')`,
-        [ctx.idtenant, ctx.idlokasi, kodegrn, item.idbarang, item.jml, tgl, `GRN ${kodegrn}`, idgrn]
+        [ctx.idtenant, idlokasi, kodegrn, item.idbarang, item.jml, tgl, `GRN ${kodegrn}`, idgrn]
       );
 
       // Detail faktur beli
@@ -134,7 +137,7 @@ exports.create = async (req, res) => {
       await conn.query(
         `INSERT INTO kartuhutang (idtenant, idlokasi, idsupplier, kodetrans, jenis, amount, terbayar, sisa, tgltrans, status)
          VALUES (?, ?, ?, ?, 'BELI', ?, 0, ?, ?, 'OPEN')`,
-        [ctx.idtenant, ctx.idlokasi, idsupplier, kodebeli, grandtotal, grandtotal, tgl]
+        [ctx.idtenant, idlokasi, idsupplier, kodebeli, grandtotal, grandtotal, tgl]
       );
     }
 
@@ -151,19 +154,19 @@ exports.create = async (req, res) => {
       await conn.query(
         `INSERT INTO jurnal (idtenant, idlokasi, idtrans, kodetrans, jenis, tgltrans, idakun, posisi, amount, status)
          VALUES (?, ?, ?, ?, 'grn', ?, ?, 'DEBET', ?, 'AKTIF')`,
-        [ctx.idtenant, ctx.idlokasi, idgrn, kodegrn, tgl, akunPersediaan.idakun, grandtotal]
+        [ctx.idtenant, idlokasi, idgrn, kodegrn, tgl, akunPersediaan.idakun, grandtotal]
       );
     }
     if (akunHutang) {
       await conn.query(
         `INSERT INTO jurnal (idtenant, idlokasi, idtrans, kodetrans, jenis, tgltrans, idakun, posisi, amount, status)
          VALUES (?, ?, ?, ?, 'grn', ?, ?, 'KREDIT', ?, 'AKTIF')`,
-        [ctx.idtenant, ctx.idlokasi, idgrn, kodegrn, tgl, akunHutang.idakun, grandtotal]
+        [ctx.idtenant, idlokasi, idgrn, kodegrn, tgl, akunHutang.idakun, grandtotal]
       );
     }
 
     await conn.commit();
-    await logger.history('GRN_CREATE', { idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser, ref: kodegrn, detail: { grandtotal }, req });
+    await logger.history('GRN_CREATE', { idtenant: ctx.idtenant, idlokasi, iduser: ctx.iduser, ref: kodegrn, detail: { grandtotal }, req });
     res.status(201).json({ message: 'GRN berhasil dibuat', kodegrn, idgrn, kodebeli, idbeli, grandtotal });
   } catch (err) {
     await conn.rollback();
