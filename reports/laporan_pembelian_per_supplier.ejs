@@ -4,18 +4,64 @@
   <meta charset="UTF-8">
   <title>Laporan Pembelian Per Supplier</title>
   <link rel="stylesheet" href="/reports/laporan_style.css">
-  <style>@media print { .no-print { display: none; } }</style>
+  <style>
+    @media print { .no-print { display: none; } }
+    
+    /* Styling Header Grouping Supplier */
+    .supplier-group-header {
+      background-color: #C4683D;
+      color: white;
+      padding: 8px 12px;
+      border-radius: 8px 8px 0 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 25px;
+      font-weight: bold;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+    .supplier-group-header .tag-code { background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 4px; margin-right: 8px; font-size: 12px; }
+    
+    /* Styling Tabel Merge */
+    table { width: 100%; border-collapse: collapse; margin-bottom: 0; }
+    th, td { border: 1px solid #D7CAC1; padding: 6px 4px; font-size: 10px; }
+    th { background-color: #f8f9fa; }
+    
+    td.rs { vertical-align: top; background-color: #ffffff; } /* Rowspan columns */
+    td.item { background-color: #ffffff; } /* Item columns */
+    
+    .status-badge { padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold; display: inline-block; }
+    .status-badge.lunas { background: #DCFCE7; color: #166534; }
+    .status-badge.belum { background: #FEE2E2; color: #991B1B; }
+
+    .center { text-align: center; }
+    .right { text-align: right; }
+    
+    .subtotal-row { background-color: #FCF8F5; font-weight: bold; }
+    
+    .grand-total-banner {
+      background-color: #C4683D;
+      color: white;
+      padding: 12px;
+      border-radius: 8px;
+      margin-top: 20px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 14px;
+      font-weight: bold;
+    }
+  </style>
 </head>
 <body>
   <div class="no-print" style="text-align:right;margin-bottom:10px;">
-    <button onclick="window.print()" style="padding:8px 16px;background:#C4683D;color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;font-weight:600;">Cetak</button>
+    <button onclick="window.print()" style="padding:8px 16px;background:#C4683D;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;">Cetak</button>
   </div>
 
   <div class="report-header">
     <% if (logo) { %><img class="logo" src="<%= logo %>" alt="Logo"><% } %>
     <h2><%= namatoko %></h2>
     <p class="subtitle"><%= alamat %> | <%= hp %></p>
-    <h3>LAPORAN PEMBELIAN PER SUPPLIER</h3>
+    <h3>LAPORAN PEMBELIAN PER SUPPLIER (DETAIL)</h3>
   </div>
 
   <div class="report-meta">
@@ -23,36 +69,109 @@
     <span>Tanggal Cetak: <%= tglcetak %></span>
   </div>
 
-  <table>
-    <thead>
-      <tr>
-        <th class="center">No</th>
-        <th>Kode Supplier</th>
-        <th>Nama Supplier</th>
-        <th class="center">Total Transaksi</th>
-        <th class="right">Total Pembelian</th>
-      </tr>
-    </thead>
-    <tbody>
-      <% data.forEach(function(row, i) { %>
-      <tr>
-        <td class="center"><%= i + 1 %></td>
-        <td><%= row.kodesupplier || '-' %></td>
-        <td><%= row.namasupplier || '-' %></td>
-        <td class="center"><%= row.total_transaksi || 0 %></td>
-        <td class="right">Rp <%= Number(row.total_pembelian || 0).toLocaleString('id-ID') %></td>
-      </tr>
-      <% }); %>
-    </tbody>
-    <tfoot>
-      <tr>
-        <td colspan="4">TOTAL</td>
-        <td class="right">Rp <%= Number(grandTotal).toLocaleString('id-ID') %></td>
-      </tr>
-    </tfoot>
-  </table>
+  <% 
+    // 1. Grouping data berdasarkan Supplier
+    const groupedBySupplier = transactions.reduce((acc, trx) => {
+      const key = trx.kodesupplier || 'NON-SUPP';
+      if (!acc[key]) {
+        acc[key] = {
+          nama: trx.namasupplier || 'Tanpa Nama',
+          listTrx: [],
+          totalPerSupplier: 0
+        };
+      }
+      acc[key].listTrx.push(trx);
+      acc[key].totalPerSupplier += Number(trx.grandtotal || 0);
+      return acc;
+    }, {});
+  %>
 
-  <div class="report-footer">
+  <% Object.keys(groupedBySupplier).forEach(function(kodeSupp) { 
+      let supplier = groupedBySupplier[kodeSupp];
+  %>
+    <!-- Header Oranye Per Supplier -->
+    <div class="supplier-group-header">
+      <div>
+        <span class="tag-code"><%= kodeSupp %></span>
+        <span><%= supplier.nama %></span>
+      </div>
+      <div style="font-size: 11px;">Total Transaksi: <%= supplier.listTrx.length %></div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th class="center" width="20">No</th>
+          <th width="80">Kode Beli</th>
+          <th class="center" width="60">Tanggal</th>
+          <th width="70">Lokasi</th>
+          <th>Kode Brg</th>
+          <th>Nama Barang</th>
+          <th class="center">Qty</th>
+          <th class="center">Sat</th>
+          <th class="right">Harga</th>
+          <th class="right">PPN</th>
+          <th class="right">Subtotal</th>
+          <th class="right">Grand Total</th>
+          <th class="right">Dibayar</th>
+          <th class="right">Sisa</th>
+          <th class="center">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% supplier.listTrx.forEach(function(trx, trxIdx) { %>
+          <% trx.items.forEach(function(item, itemIdx) { %>
+          <tr>
+            <% if (itemIdx === 0) { %>
+              <!-- Merge data transaksi -->
+              <td class="center rs" rowspan="<%= trx.items.length %>"><%= trxIdx + 1 %></td>
+              <td class="rs" rowspan="<%= trx.items.length %>"><%= trx.kodebeli %></td>
+              <td class="center rs" rowspan="<%= trx.items.length %>">
+                <%= trx.tgltrans && trx.tgltrans.toISOString ? trx.tgltrans.toISOString().slice(0,10) : trx.tgltrans %>
+              </td>
+              <td class="rs" rowspan="<%= trx.items.length %>"><%= trx.namalokasi %></td>
+            <% } %>
+
+            <!-- Data Barang -->
+            <td class="center item"><%= item.kodebarang %></td>
+            <td class="item"><%= item.namabarang %></td>
+            <td class="center item"><%= Number(item.jml) %></td>
+            <td class="center item"><%= item.satuan %></td>
+            <td class="right item"><%= Number(item.harga).toLocaleString('id-ID') %></td>
+            <td class="right item"><%= Number(item.ppn).toLocaleString('id-ID') %></td>
+            <td class="right item"><%= Number(item.subtotal).toLocaleString('id-ID') %></td>
+
+            <% if (itemIdx === 0) { %>
+              <!-- Merge data finansial -->
+              <td class="right rs" rowspan="<%= trx.items.length %>"><%= Number(trx.grandtotal).toLocaleString('id-ID') %></td>
+              <td class="right rs" rowspan="<%= trx.items.length %>"><%= Number(trx.bayar || 0).toLocaleString('id-ID') %></td>
+              <td class="right rs" rowspan="<%= trx.items.length %>"><%= Number(trx.sisa || 0).toLocaleString('id-ID') %></td>
+              <td class="center rs" rowspan="<%= trx.items.length %>">
+                <span class="status-badge <%= trx.statusLunas === 'LUNAS' ? 'lunas' : 'belum' %>">
+                  <%= trx.statusLunas %>
+                </span>
+              </td>
+            <% } %>
+          </tr>
+          <% }); %>
+        <% }); %>
+      </tbody>
+      <tfoot>
+        <tr class="subtotal-row">
+          <td colspan="11" class="right">TOTAL PEMBELIAN <%= supplier.nama %>:</td>
+          <td class="right"><%= Number(supplier.totalPerSupplier).toLocaleString('id-ID') %></td>
+          <td colspan="3"></td>
+        </tr>
+      </tfoot>
+    </table>
+  <% }); %>
+
+  <div class="grand-total-banner">
+    <span>GRAND TOTAL KESELURUHAN</span>
+    <span>Rp <%= Number(grandTotal).toLocaleString('id-ID') %></span>
+  </div>
+
+  <div class="report-footer" style="margin-top: 20px; text-align: center;">
     <p>&copy; <%= namatoko %> - Generated by Grfyn POS</p>
   </div>
 </body>

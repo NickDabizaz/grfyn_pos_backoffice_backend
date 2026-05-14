@@ -8,6 +8,46 @@
     @media print { .no-print { display: none; } }
     .filter-tags { margin-bottom: 8px; }
     .filter-tags .tag { display:inline-block; background:#FAEFE5; color:#C4683D; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600; margin:2px; }
+
+    .lokasi-group-header {
+      background-color: #C4683D;
+      color: white;
+      padding: 8px 12px;
+      border-radius: 8px 8px 0 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 25px;
+      font-weight: bold;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+    .lokasi-group-header .tag-code { background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 4px; margin-right: 8px; font-size: 12px; }
+
+    table { width: 100%; border-collapse: collapse; margin-bottom: 0; }
+    th, td { border: 1px solid #D7CAC1; padding: 6px 4px; font-size: 10px; }
+    th { background-color: #f8f9fa; }
+    td.rs { vertical-align: top; background-color: #ffffff; }
+    td.item { background-color: #ffffff; }
+
+    .status-badge { padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold; display: inline-block; }
+    .status-badge.lunas { background: #DCFCE7; color: #166534; }
+    .status-badge.belum { background: #FEE2E2; color: #991B1B; }
+
+    .center { text-align: center; }
+    .right { text-align: right; }
+    .subtotal-row { background-color: #FCF8F5; font-weight: bold; }
+
+    .grand-total-banner {
+      background-color: #C4683D;
+      color: white;
+      padding: 12px;
+      border-radius: 8px;
+      margin-top: 20px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 14px;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
@@ -19,7 +59,7 @@
     <% if (logo) { %><img class="logo" src="<%= logo %>" alt="Logo"><% } %>
     <h2><%= namatoko %></h2>
     <p class="subtitle"><%= alamat %> | <%= hp %></p>
-    <h3>LAPORAN PENJUALAN PER LOKASI</h3>
+    <h3>LAPORAN PENJUALAN PER LOKASI (DETAIL)</h3>
   </div>
 
   <div class="report-meta">
@@ -37,88 +77,108 @@
   </div>
   <% } %>
 
-  <%
-    // Grouping data per lokasi di sisi EJS
-    const groups = {};
-    const groupOrder = [];
-    data.forEach(function(row) {
-      const key = row.kodelokasi || row.namalokasi;
-      if (!groups[key]) {
-        groups[key] = {
-          kodelokasi     : row.kodelokasi,
-          namalokasi     : row.namalokasi,
-          items          : [],
-          total_transaksi: 0,
-          total_penjualan: 0,
-          total_piutang  : 0
+  <% 
+    // Grouping data berdasarkan Lokasi
+    const groupedByLokasi = transactions.reduce((acc, trx) => {
+      const key = trx.kodelokasi || trx.namalokasi || 'NON-LOK';
+      if (!acc[key]) {
+        acc[key] = {
+          kodelokasi: trx.kodelokasi || '-',
+          nama      : trx.namalokasi || 'Tanpa Nama',
+          listTrx   : [],
+          totalPerLokasi: 0
         };
-        groupOrder.push(key);
       }
-      const sisa = Number(row.sisa || 0);
-      groups[key].items.push(row);
-      groups[key].total_transaksi += 1;
-      groups[key].total_penjualan += Number(row.grandtotal || 0);
-      groups[key].total_piutang   += sisa > 0 ? sisa : 0;
-    });
+      acc[key].listTrx.push(trx);
+      acc[key].totalPerLokasi += Number(trx.grandtotal || 0);
+      return acc;
+    }, {});
   %>
 
-  <% if (groupOrder.length === 0) { %>
-    <p style="text-align:center;color:#998A76;padding:20px;">Tidak ada data untuk periode ini.</p>
-  <% } %>
-
-  <% groupOrder.forEach(function(key) { %>
-  <% var grp = groups[key]; %>
-  <div class="group-block">
-    <div class="group-header">
-      <span class="group-label"><%= grp.kodelokasi || '-' %></span>
-      <span class="group-title"><%= grp.namalokasi %></span>
-      <span class="group-sub"><%= grp.total_transaksi %> Transaksi</span>
+  <% Object.keys(groupedByLokasi).forEach(function(kodeLok) { 
+      let lokasi = groupedByLokasi[kodeLok];
+  %>
+    <!-- Header Oranye Per Lokasi -->
+    <div class="lokasi-group-header">
+      <div>
+        <span class="tag-code"><%= lokasi.kodelokasi %></span>
+        <span><%= lokasi.nama %></span>
+      </div>
+      <div style="font-size: 11px;">Total Transaksi: <%= lokasi.listTrx.length %></div>
     </div>
+
     <table>
       <thead>
         <tr>
-          <th class="center">No</th>
-          <th>No. Jual</th>
-          <th class="center">Tgl Transaksi</th>
+          <th class="center" width="20">No</th>
+          <th width="80">Kode Jual</th>
+          <th class="center" width="60">Tanggal</th>
           <th>Customer</th>
-          <th class="right">Total</th>
+          <th>Kode Brg</th>
+          <th>Nama Barang</th>
+          <th class="center">Qty</th>
+          <th class="center">Sat</th>
+          <th class="right">Harga</th>
+          <th class="right">PPN</th>
+          <th class="right">Subtotal</th>
+          <th class="right">Grand Total</th>
+          <th class="center">Jenis</th>
           <th class="center">Status</th>
         </tr>
       </thead>
       <tbody>
-        <% grp.items.forEach(function(item, i) { %>
-        <%
-          var sisa = Number(item.sisa || 0);
-          var statusBayar = sisa <= 0 ? 'LUNAS' : 'Belum Lunas';
-          var badgeClass = sisa <= 0 ? 'completed' : 'pending';
-        %>
-        <tr>
-          <td class="center"><%= i + 1 %></td>
-          <td><%= item.kodejual || '-' %></td>
-          <td class="center"><%= item.tgltrans ? new Date(item.tgltrans).toLocaleDateString('id-ID') : '-' %></td>
-          <td><%= item.namacustomer || '-' %></td>
-          <td class="right">Rp <%= Number(item.grandtotal || 0).toLocaleString('id-ID') %></td>
-          <td class="center"><span class="status-badge <%= badgeClass %>"><%= statusBayar %></span></td>
-        </tr>
+        <% lokasi.listTrx.forEach(function(trx, trxIdx) { %>
+          <% trx.items.forEach(function(item, itemIdx) { %>
+          <tr>
+            <% if (itemIdx === 0) { %>
+              <!-- Merge data transaksi -->
+              <td class="center rs" rowspan="<%= trx.items.length %>"><%= trxIdx + 1 %></td>
+              <td class="rs" rowspan="<%= trx.items.length %>"><%= trx.kodejual %></td>
+              <td class="center rs" rowspan="<%= trx.items.length %>">
+                <%= trx.tgltrans && trx.tgltrans.toISOString ? trx.tgltrans.toISOString().slice(0,10) : trx.tgltrans %>
+              </td>
+              <td class="rs" rowspan="<%= trx.items.length %>"><%= trx.namacustomer || '-' %></td>
+            <% } %>
+
+            <!-- Data Barang -->
+            <td class="center item"><%= item.kodebarang %></td>
+            <td class="item"><%= item.namabarang %></td>
+            <td class="center item"><%= Number(item.jml) %></td>
+            <td class="center item"><%= item.satuan %></td>
+            <td class="right item"><%= Number(item.harga).toLocaleString('id-ID') %></td>
+            <td class="right item"><%= Number(item.ppn).toLocaleString('id-ID') %></td>
+            <td class="right item"><%= Number(item.subtotal).toLocaleString('id-ID') %></td>
+
+            <% if (itemIdx === 0) { %>
+              <!-- Merge data finansial -->
+              <td class="right rs" rowspan="<%= trx.items.length %>"><%= Number(trx.grandtotal).toLocaleString('id-ID') %></td>
+              <td class="center rs" rowspan="<%= trx.items.length %>"><%= trx.jenis || '-' %></td>
+              <td class="center rs" rowspan="<%= trx.items.length %>">
+                <span class="status-badge <%= trx.statusLunas === 'LUNAS' ? 'lunas' : 'belum' %>">
+                  <%= trx.statusLunas %>
+                </span>
+              </td>
+            <% } %>
+          </tr>
+          <% }); %>
         <% }); %>
       </tbody>
       <tfoot>
-        <tr>
-          <td colspan="4" style="text-align:right;">Subtotal <%= grp.namalokasi %>:</td>
-          <td class="right"><strong>Rp <%= Number(grp.total_penjualan).toLocaleString('id-ID') %></strong></td>
-          <td class="right" style="font-size:10px;color:#998A76;">Piutang: Rp <%= Number(grp.total_piutang).toLocaleString('id-ID') %></td>
+        <tr class="subtotal-row">
+          <td colspan="11" class="right">TOTAL PENJUALAN <%= lokasi.nama %>:</td>
+          <td class="right"><%= Number(lokasi.totalPerLokasi).toLocaleString('id-ID') %></td>
+          <td colspan="2"></td>
         </tr>
       </tfoot>
     </table>
-  </div>
   <% }); %>
 
-  <div class="grand-total-block">
-    <span>GRAND TOTAL PENJUALAN</span>
+  <div class="grand-total-banner">
+    <span>GRAND TOTAL KESELURUHAN</span>
     <span>Rp <%= Number(grandTotal).toLocaleString('id-ID') %></span>
   </div>
 
-  <div class="report-footer">
+  <div class="report-footer" style="margin-top: 20px; text-align: center;">
     <p>&copy; <%= namatoko %> - Generated by Grfyn POS</p>
   </div>
 </body>

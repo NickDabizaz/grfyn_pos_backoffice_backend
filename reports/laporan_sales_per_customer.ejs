@@ -114,6 +114,7 @@
           <th class="right">Grand Total</th>
           <th class="right">Dibayar</th>
           <th class="right">Sisa</th>
+          <th class="center">Jenis</th>
           <th class="center">Status</th>
         </tr>
       </thead>
@@ -144,6 +145,7 @@
               <td class="right rs" rowspan="<%= trx.items.length %>"><%= Number(trx.grandtotal).toLocaleString('id-ID') %></td>
               <td class="right rs" rowspan="<%= trx.items.length %>"><%= Number(trx.amount || 0).toLocaleString('id-ID') %></td>
               <td class="right rs" rowspan="<%= trx.items.length %>"><%= Number(trx.sisa || 0).toLocaleString('id-ID') %></td>
+              <td class="center rs" rowspan="<%= trx.items.length %>"><%= trx.jenis || '-' %></td>
               <td class="center rs" rowspan="<%= trx.items.length %>">
                 <span class="status-badge <%= trx.statusLunas === 'LUNAS' ? 'lunas' : 'belum' %>">
                   <%= trx.statusLunas %>
@@ -158,7 +160,7 @@
         <tr class="subtotal-row">
           <td colspan="10" class="right">TOTAL PENJUALAN <%= customer.nama %>:</td>
           <td class="right"><%= Number(customer.totalPerCustomer).toLocaleString('id-ID') %></td>
-          <td colspan="3"></td>
+          <td colspan="4"></td>
         </tr>
       </tfoot>
     </table>

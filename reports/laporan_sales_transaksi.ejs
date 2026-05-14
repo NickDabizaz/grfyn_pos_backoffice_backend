@@ -66,6 +66,7 @@
         <th class="right">Dibayar</th>
         <th class="right">Sisa</th>
         <th class="center">Status</th>
+        <th class="center">Jenis</th>
         <th class="center">Tgl Lunas</th>
       </tr>
     </thead>
@@ -104,6 +105,7 @@
             <td class="center rs" rowspan="<%= trx.items.length %>">
               <span class="status-badge <%= trx.statusLunas === 'LUNAS' ? 'lunas' : 'belum' %>"><%= trx.statusLunas %></span>
             </td>
+            <td class="center rs" rowspan="<%= trx.items.length %>"><%= trx.jenis || '-' %></td>
             <td class="center rs" rowspan="<%= trx.items.length %>">
               <%= trx.tglpelunasan && trx.tglpelunasan.toISOString ? trx.tglpelunasan.toISOString().slice(0,10) : (trx.tglpelunasan || '-') %>
             </td>
@@ -114,7 +116,7 @@
     </tbody>
     <tfoot>
       <tr style="background-color: #FAEFE5; font-weight: bold;">
-        <td colspan="13">TOTAL (<%= totalTransaksi %> Transaksi)</td>
+        <td colspan="14">TOTAL (<%= totalTransaksi %> Transaksi)</td>
         <td class="right" colspan="5"><%= Number(totalPenjualan).toLocaleString('id-ID') %></td>
       </tr>
     </tfoot>
