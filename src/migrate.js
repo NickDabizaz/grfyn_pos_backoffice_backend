@@ -298,12 +298,13 @@ async function migrate() {
       satuankecil  VARCHAR(20) DEFAULT NULL,
       konversi1    INT DEFAULT 0,
       konversi2    INT DEFAULT 0,
-      jenis        VARCHAR(30) DEFAULT 'BAHAN JADI',
+      jenis        VARCHAR(30) DEFAULT 'BARANG JADI',
       stokmin      DECIMAL(15,3) DEFAULT 0,
       status       VARCHAR(20) DEFAULT 'AKTIF',
       userentry    INT NOT NULL DEFAULT 0,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       UNIQUE KEY uq_barang_kode (idtenant, kodebarang),
+      UNIQUE KEY uq_barang_nama (idtenant, namabarang),
       INDEX idx_barang_nama (namabarang)
     ) ENGINE=InnoDB
   `);
@@ -1241,7 +1242,7 @@ async function migrate() {
       idproduksi    INT NOT NULL,
       idtenant      INT NOT NULL,
       idbarang      INT NOT NULL,
-      jenisbarang   ENUM('BAHAN BAKU', 'BAHAN SETENGAH JADI', 'BAHAN JADI') NOT NULL,
+      jenisbarang   ENUM('BAHAN BAKU', 'BAHAN SETENGAH JADI', 'BARANG JADI') NOT NULL,
       jml           DECIMAL(15,2) NOT NULL,
       satuan        VARCHAR(20) NULL,
       harga_satuan  DECIMAL(15,2) DEFAULT 0,

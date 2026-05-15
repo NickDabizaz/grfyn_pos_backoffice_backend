@@ -217,6 +217,7 @@ exports.register = async (req, res) => {
     }
 
     await setConfigValue(conn, idtenant, 'GLOBAL', 'CEKMINUS', 'TIDAK', 1);
+    await setConfigValue(conn, idtenant, 'BARANG', 'PAKAIBAHANBAKU', 'YA', 1);
 
     await conn.commit();
 

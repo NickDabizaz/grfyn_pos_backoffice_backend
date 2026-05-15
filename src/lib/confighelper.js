@@ -2,6 +2,9 @@ const DEFAULT_CONFIGS = {
   GLOBAL: {
     CEKMINUS: 'TIDAK',
   },
+  BARANG: {
+    PAKAIBAHANBAKU: 'YA',
+  },
 };
 
 let configTableReady = false;
@@ -59,6 +62,11 @@ async function isCekMinusEnabled(conn, idtenant) {
   return String(value || '').toUpperCase() === 'YA';
 }
 
+async function isPakaiBahanBakuEnabled(conn, idtenant) {
+  const value = await getConfigValue(conn, idtenant, 'BARANG', 'PAKAIBAHANBAKU');
+  return String(value || '').toUpperCase() === 'YA';
+}
+
 async function assertNoMinusStock(conn, { idtenant, idlokasi, idbarangList }) {
   const ids = [...new Set((idbarangList || []).map(Number).filter(Boolean))];
   if (!ids.length) return;
@@ -93,5 +101,6 @@ module.exports = {
   getConfigValue,
   setConfigValue,
   isCekMinusEnabled,
+  isPakaiBahanBakuEnabled,
   assertNoMinusStock,
 };

@@ -15,6 +15,10 @@ async function getBarangInfo(conn, idbarang, idtenant) {
   return row || null;
 }
 
+function isBarangJadi(jenis) {
+  return jenis === 'BARANG JADI';
+}
+
 // Helper: Konversi jumlah item ke satuan terkecil
 function toKecilJml(jml, satuan, barang) {
   const k1 = Math.max(parseInt(barang.konversi1) || 1, 1); // Besar -> Sedang
@@ -40,7 +44,7 @@ function validateItems(items) {
       return { valid: false, message: 'Setiap item harus memiliki idbarang dan jml > 0' };
     }
     const jenis = item._jenis; // Diset setelah lookup master barang
-    if (jenis === 'BAHAN JADI') hasBahanJadi = true;
+    if (isBarangJadi(jenis)) hasBahanJadi = true;
     if (jenis === 'BAHAN BAKU' || jenis === 'BAHAN SETENGAH JADI') hasBahanBaku = true;
   }
 
@@ -131,13 +135,13 @@ exports.create = async (req, res) => {
       barangCache[item.idbarang] = b;
     }
 
-    // 2. Validasi minimal 1 BAHAN JADI dan 1 BAHAN BAKU/SETENGAH JADI
+    // 2. Validasi minimal 1 BARANG JADI dan 1 BAHAN BAKU/SETENGAH JADI
     const valid = validateItems(items);
     if (!valid.valid) return res.status(400).json({ message: valid.message });
 
-    // 3. Validasi stok untuk item non-BAHAN JADI
+    // 3. Validasi stok untuk item non-BARANG JADI
     for (const item of items) {
-      if (item._jenis === 'BAHAN JADI') continue;
+      if (isBarangJadi(item._jenis)) continue;
       
       // Konversi ke qty kecil untuk check stok
       const jmlKecil = toKecilJml(item.jml, item.satuan, item._barangInfo);
@@ -156,7 +160,7 @@ exports.create = async (req, res) => {
     let totalBahan = 0;
     let totalHasil = 0;
     for (const item of items) {
-      if (item._jenis === 'BAHAN JADI') {
+      if (isBarangJadi(item._jenis)) {
         totalHasil += parseFloat(item.jml);
       } else {
         totalBahan += parseFloat(item.jml);
@@ -197,8 +201,8 @@ exports.create = async (req, res) => {
         item.jml, item.satuan || null, hargaSatuan, subtotal
       ]);
 
-      // Kartu stok: BAHAN JADI masuk (M), lainnya keluar (K)
-      const jenisStok = item._jenis === 'BAHAN JADI' ? 'M' : 'K';
+      // Kartu stok: BARANG JADI masuk (M), lainnya keluar (K)
+      const jenisStok = isBarangJadi(item._jenis) ? 'M' : 'K';
       const jmlKecil = item._jmlKecil || toKecilJml(item.jml, item.satuan, item._barangInfo);
       
       await conn.query(insertKartustokQuery, [
@@ -343,7 +347,7 @@ exports.update = async (req, res) => {
 
     // 4. Validasi stok (exclude kartustok dari produksi ini)
     for (const item of items) {
-      if (item._jenis === 'BAHAN JADI') continue;
+      if (isBarangJadi(item._jenis)) continue;
       
       const jmlKecil = toKecilJml(item.jml, item.satuan, item._barangInfo);
       
@@ -379,7 +383,7 @@ exports.update = async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
     for (const item of items) {
-      if (item._jenis === 'BAHAN JADI') {
+      if (isBarangJadi(item._jenis)) {
         totalHasil += parseFloat(item.jml);
       } else {
         totalBahan += parseFloat(item.jml);
@@ -394,7 +398,7 @@ exports.update = async (req, res) => {
         item.jml, item.satuan || null, hargaSatuan, subtotal
       ]);
 
-      const jenisStok = item._jenis === 'BAHAN JADI' ? 'M' : 'K';
+      const jenisStok = isBarangJadi(item._jenis) ? 'M' : 'K';
       const jmlKecil = item._jmlKecil || toKecilJml(item.jml, item.satuan, item._barangInfo);
 
       await conn.query(insertKartustokQuery, [
@@ -467,7 +471,7 @@ exports.cancel = async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
     for (const dtl of details) {
-      const jenisBalik = dtl.jenisbarang === 'BAHAN JADI' ? 'K' : 'M';
+      const jenisBalik = isBarangJadi(dtl.jenisbarang) ? 'K' : 'M';
       
       // Ambil info barang untuk konversi pembatalan
       const b = await getBarangInfo(conn, dtl.idbarang, ctx.idtenant);

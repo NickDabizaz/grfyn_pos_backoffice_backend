@@ -18,7 +18,12 @@ exports.getToko = async (req, res) => {
     if (!tenant) return res.status(404).json({ message: 'Tenant tidak ditemukan' });
 
     const cekminus = await getConfigValue(pool, ctx.idtenant, 'GLOBAL', 'CEKMINUS');
-    res.json({ ...tenant, cekminus: String(cekminus || 'TIDAK').toUpperCase() });
+    const pakaibahanbaku = await getConfigValue(pool, ctx.idtenant, 'BARANG', 'PAKAIBAHANBAKU');
+    res.json({
+      ...tenant,
+      cekminus: String(cekminus || 'TIDAK').toUpperCase(),
+      pakaibahanbaku: String(pakaibahanbaku || 'YA').toUpperCase(),
+    });
   } catch (err) {
     logger.error(err, { req });
     res.status(500).json({ message: err.message });
@@ -29,11 +34,12 @@ exports.getToko = async (req, res) => {
 exports.updateToko = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const { namatenant, alamat, hp, email, ppn, cekminus } = req.body;
+    const { namatenant, alamat, hp, email, ppn, cekminus, pakaibahanbaku } = req.body;
     let sql = 'UPDATE tenant SET namatenant = ?, alamat = ?, hp = ?, email = ?, ppn = ? WHERE idtenant = ?';
     // PPN default 11 jika tidak dikirim
     await tenantExecute(sql, [namatenant, alamat, hp, email, (ppn !== undefined && ppn !== null) ? ppn : 11, ctx.idtenant]);
     await setConfigValue(pool, ctx.idtenant, 'GLOBAL', 'CEKMINUS', cekminus === true || cekminus === 'YA' ? 'YA' : 'TIDAK', 1);
+    await setConfigValue(pool, ctx.idtenant, 'BARANG', 'PAKAIBAHANBAKU', pakaibahanbaku === false || pakaibahanbaku === 'TIDAK' ? 'TIDAK' : 'YA', 1);
     res.json({ message: 'Setting berhasil diupdate' });
   } catch (err) {
     logger.error(err, { req });

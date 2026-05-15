@@ -145,13 +145,26 @@ exports.importBarang = async (req, res) => {
     const today = new Date().toISOString().slice(0, 10);
     let success = 0;
     const errors = [];
+    const seenNames = new Set();
 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
-      if (!r.namabarang) { errors.push({ row: i + 2, message: 'namabarang wajib diisi' }); continue; }
+      const namabarang = String(r.namabarang || '').trim().toUpperCase();
+      if (!namabarang) { errors.push({ row: i + 2, message: 'namabarang wajib diisi' }); continue; }
+      if (seenNames.has(namabarang)) { errors.push({ row: i + 2, message: 'namabarang duplikat di file import' }); continue; }
+      seenNames.add(namabarang);
 
       // Generate kode barang otomatis (BRG0001, BRG0002, ...)
       try {
+        const [[sameName]] = await conn.query(
+          'SELECT idbarang FROM barang WHERE idtenant = ? AND namabarang = ? LIMIT 1',
+          [ctx.idtenant, namabarang]
+        );
+        if (sameName) {
+          errors.push({ row: i + 2, message: 'namabarang sudah ada dalam tenant ini' });
+          continue;
+        }
+
         let sqlMaxKode = 'SELECT MAX(kodebarang) as maxKode FROM barang WHERE idtenant = ?';
         const [[{ maxKode }]] = await conn.query(sqlMaxKode, [ctx.idtenant]);
         let num = 1;
@@ -162,7 +175,7 @@ exports.importBarang = async (req, res) => {
         let sqlInsert = 'INSERT INTO barang (idtenant, kodebarang, namabarang, satuanbesar, satuansedang, satuankecil, konversi1, konversi2, jenis, stokmin, status, userentry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         const [result] = await conn.query(
           sqlInsert,
-          [ctx.idtenant, kodebarang, r.namabarang, r.satuanbesar || '', r.satuansedang || '', r.satuankecil || '', parseInt(r.konversi1) || 0, parseInt(r.konversi2) || 0, r.jenis || 'BAHAN JADI', parseInt(r.stokmin) || 0, 'AKTIF', ctx.iduser]
+          [ctx.idtenant, kodebarang, namabarang, r.satuanbesar || '', r.satuansedang || '', r.satuankecil || '', parseInt(r.konversi1) || 0, parseInt(r.konversi2) || 0, r.jenis || 'BARANG JADI', parseInt(r.stokmin) || 0, 'AKTIF', ctx.iduser]
         );
         const idbarang = result.insertId;
 
@@ -301,7 +314,7 @@ exports.importJual = async (req, res) => {
 exports.templateBarang = (req, res) => {
   sendCSV(res, 'template_barang.csv',
     ['namabarang', 'satuanbesar', 'satuansedang', 'satuankecil', 'konversi1', 'konversi2', 'jenis', 'stokmin', 'hargabeli', 'hargajual'],
-    [{ namabarang: 'Contoh Barang', satuanbesar: 'DUS', satuansedang: 'PACK', satuankecil: 'PCS', konversi1: '10', konversi2: '50', jenis: 'BAHAN JADI', stokmin: '5', hargabeli: '10000', hargajual: '15000' }]
+    [{ namabarang: 'Contoh Barang', satuanbesar: 'DUS', satuansedang: 'PACK', satuankecil: 'PCS', konversi1: '10', konversi2: '50', jenis: 'BARANG JADI', stokmin: '5', hargabeli: '10000', hargajual: '15000' }]
   );
 };
 

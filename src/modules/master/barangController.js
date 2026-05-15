@@ -3,7 +3,72 @@
 
 const { tenantQuery, tenantExecute, getConnection, getTenantContext } = require('../../config/db');
 const { generateKodeMaster } = require('../../lib/kodetrans');
+const { isPakaiBahanBakuEnabled } = require('../../lib/confighelper');
 const logger = require('../../lib/logger');
+
+const JENIS_OPTIONS = ['BAHAN BAKU', 'BAHAN SETENGAH JADI', 'BARANG JADI'];
+
+function normalizeText(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function parsePositiveNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function validateAndNormalizeBarangPayload(body, { pakaiBahanBaku }) {
+  const satuanbesar = normalizeText(body.satuanbesar);
+  const satuansedang = normalizeText(body.satuansedang);
+  const satuankecil = normalizeText(body.satuankecil);
+  const units = [satuanbesar, satuansedang, satuankecil].filter(Boolean);
+
+  if (!units.length) {
+    return { valid: false, message: 'Minimal isi 1 satuan. Mulai dari Satuan Kecil.' };
+  }
+
+  if (!satuankecil && (satuansedang || satuanbesar)) {
+    return { valid: false, message: 'Satuan Kecil harus diisi terlebih dahulu sebelum Satuan Sedang atau Satuan Besar.' };
+  }
+
+  if (satuanbesar && !satuansedang) {
+    return { valid: false, message: 'Satuan Sedang harus diisi sebelum Satuan Besar.' };
+  }
+
+  if (units.length !== new Set(units).size) {
+    return { valid: false, message: 'Satuan Besar, Satuan Sedang, dan Satuan Kecil tidak boleh sama.' };
+  }
+
+  let konversi1 = 1;
+  let konversi2 = 1;
+
+  if (satuansedang) {
+    konversi2 = parsePositiveNumber(body.konversi2);
+    if (!konversi2) return { valid: false, message: 'Konversi Kecil harus lebih dari 0.' };
+  }
+
+  if (satuanbesar) {
+    konversi1 = parsePositiveNumber(body.konversi1);
+    if (!konversi1) return { valid: false, message: 'Konversi Besar harus lebih dari 0.' };
+  }
+
+  const jenis = pakaiBahanBaku ? normalizeText(body.jenis || 'BARANG JADI') : 'BARANG JADI';
+  if (!JENIS_OPTIONS.includes(jenis)) {
+    return { valid: false, message: 'Jenis barang tidak valid.' };
+  }
+
+  return {
+    valid: true,
+    data: {
+      satuanbesar,
+      satuansedang,
+      satuankecil,
+      konversi1,
+      konversi2,
+      jenis,
+    },
+  };
+}
 
 // GET /barang — Menampilkan semua barang dengan harga beli/jual terbaru dan stok dari kartustok
 exports.getAll = async (req, res) => {
@@ -20,7 +85,7 @@ exports.getAll = async (req, res) => {
     const params = [ctx.idtenant, ctx.idtenant, ctx.idtenant];
     // Filter opsional: pencarian berdasarkan nama/kode barang
     if (search) { sql += ' AND (b.namabarang LIKE ? OR b.kodebarang LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
-    // Filter opsional: jenis barang (BAHAN JADI, BAHAN BAKU, dll)
+    // Filter opsional: jenis barang (BARANG JADI, BAHAN BAKU, dll)
     if (jenis) { sql += ' AND b.jenis = ?'; params.push(jenis); }
     sql += ' GROUP BY b.idbarang ORDER BY kodebarang ASC';
     const rows = await tenantQuery(sql, params);
@@ -98,8 +163,12 @@ exports.create = async (req, res) => {
   const conn = await getConnection();
   try {
     const ctx = getTenantContext();
-    await conn.beginTransaction();
     const { namabarang, satuanbesar, satuansedang, satuankecil, konversi1, konversi2, jenis, stokmin, hargabeli, hargajual, kodebarang: customKode } = req.body;
+    const pakaiBahanBaku = await isPakaiBahanBakuEnabled(conn, ctx.idtenant);
+    const normalized = validateAndNormalizeBarangPayload({ satuanbesar, satuansedang, satuankecil, konversi1, konversi2, jenis }, { pakaiBahanBaku });
+    if (!normalized.valid) return res.status(400).json({ message: normalized.message });
+
+    await conn.beginTransaction();
 
     // Generate kode barang: gunakan kustom jika ada, jika tidak auto-generate
     const kodebarang = (customKode && customKode.trim())
@@ -107,9 +176,23 @@ exports.create = async (req, res) => {
       : await generateKodeMaster(conn, 'BRG', ctx.idtenant, 'barang', 'kodebarang', 4);
     const today = new Date().toISOString().slice(0, 10); // Tanggal hari ini (YYYY-MM-DD)
 
+    const [[sameName]] = await conn.query(
+      'SELECT idbarang FROM barang WHERE idtenant = ? AND namabarang = ? LIMIT 1',
+      [ctx.idtenant, normalizeText(namabarang)]
+    );
+    if (sameName) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Nama barang sudah ada dalam tenant ini' });
+    }
+
     // Insert barang utama
     let sql = 'INSERT INTO barang (idtenant, kodebarang, namabarang, satuanbesar, satuansedang, satuankecil, konversi1, konversi2, jenis, stokmin, status, userentry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
-    const [result] = await conn.query(sql, [ctx.idtenant, kodebarang, namabarang, satuanbesar, satuansedang, satuankecil, konversi1 || 0, konversi2 || 0, jenis || 'BAHAN JADI', stokmin || 0, 'AKTIF', ctx.iduser]);
+    const [result] = await conn.query(sql, [
+      ctx.idtenant, kodebarang, normalizeText(namabarang),
+      normalized.data.satuanbesar, normalized.data.satuansedang, normalized.data.satuankecil,
+      normalized.data.konversi1, normalized.data.konversi2, normalized.data.jenis,
+      stokmin || 0, 'AKTIF', ctx.iduser
+    ]);
     const idbarang = result.insertId;
 
     // Insert harga beli awal jika disediakan
@@ -128,6 +211,9 @@ exports.create = async (req, res) => {
   } catch (err) {
     await conn.rollback();
     logger.error(err, { req });
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(400).json({ message: 'Kode barang atau nama barang sudah ada dalam tenant ini' });
+    }
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();
@@ -139,26 +225,42 @@ exports.update = async (req, res) => {
   const conn = await getConnection();
   try {
     const ctx = getTenantContext();
-    await conn.beginTransaction();
     const { namabarang, satuanbesar, satuansedang, satuankecil, konversi1, konversi2, jenis, stokmin, hargabeli, hargajual, status } = req.body;
     const { id } = req.params;
+    const pakaiBahanBaku = await isPakaiBahanBakuEnabled(conn, ctx.idtenant);
+    const normalized = validateAndNormalizeBarangPayload({ satuanbesar, satuansedang, satuankecil, konversi1, konversi2, jenis }, { pakaiBahanBaku });
+    if (!normalized.valid) return res.status(400).json({ message: normalized.message });
+
+    await conn.beginTransaction();
 
     // Validasi: cek barang ada
     let sql = 'SELECT * FROM barang WHERE idbarang = ? AND idtenant = ?';
     const [barang] = await conn.query(sql, [id, ctx.idtenant]);
-    if (barang.length === 0) return res.status(404).json({ message: 'Barang tidak ditemukan' });
+    if (barang.length === 0) {
+      await conn.rollback();
+      return res.status(404).json({ message: 'Barang tidak ditemukan' });
+    }
 
     // Update data barang — gunakan nilai lama jika field tidak dikirim (?? untuk null-check, || untuk falsy)
+    const [[sameName]] = await conn.query(
+      'SELECT idbarang FROM barang WHERE idtenant = ? AND namabarang = ? AND idbarang <> ? LIMIT 1',
+      [ctx.idtenant, normalizeText(namabarang || barang[0].namabarang), id]
+    );
+    if (sameName) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Nama barang sudah ada dalam tenant ini' });
+    }
+
     let sql2 = 'UPDATE barang SET namabarang = ?, satuanbesar = ?, satuansedang = ?, satuankecil = ?, konversi1 = ?, konversi2 = ?, jenis = ?, stokmin = ?, status = ? WHERE idbarang = ? AND idtenant = ?';
     await conn.query(sql2,
       [
-        namabarang || barang[0].namabarang,
-        satuanbesar ?? barang[0].satuanbesar,
-        satuansedang ?? barang[0].satuansedang,
-        satuankecil ?? barang[0].satuankecil,
-        konversi1 ?? barang[0].konversi1,
-        konversi2 ?? barang[0].konversi2,
-        jenis || barang[0].jenis,
+        normalizeText(namabarang || barang[0].namabarang),
+        normalized.data.satuanbesar,
+        normalized.data.satuansedang,
+        normalized.data.satuankecil,
+        normalized.data.konversi1,
+        normalized.data.konversi2,
+        normalized.data.jenis,
         stokmin ?? barang[0].stokmin,
         status ?? barang[0].status, id, ctx.idtenant
       ]
@@ -190,6 +292,9 @@ exports.update = async (req, res) => {
   } catch (err) {
     await conn.rollback();
     logger.error(err, { req });
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(400).json({ message: 'Kode barang atau nama barang sudah ada dalam tenant ini' });
+    }
     res.status(500).json({ message: err.message });
   } finally {
     conn.release();
