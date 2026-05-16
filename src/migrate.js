@@ -572,22 +572,23 @@ async function migrate() {
   await connection.query(`
     CREATE TABLE kartustok (
       idkartustok INT AUTO_INCREMENT PRIMARY KEY,
+      idtrans     INT DEFAULT NULL,
+      kodetrans   VARCHAR(30) NOT NULL,
+      jenistransaksi VARCHAR(50) DEFAULT NULL,
       idtenant    INT NOT NULL,
       idlokasi    INT NOT NULL,
-      kodetrans   VARCHAR(30) NOT NULL,
       idbarang    INT NOT NULL,
       jml         DECIMAL(15,3) NOT NULL,
       jenis       VARCHAR(5) NOT NULL,
       tgltrans    DATE NOT NULL,
       keterangan  VARCHAR(200) DEFAULT NULL,
-      idref       INT DEFAULT NULL,
-      jenisref    VARCHAR(30) DEFAULT NULL,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
       FOREIGN KEY (idbarang) REFERENCES barang(idbarang),
       INDEX idx_kartustok_barang_tgl (idbarang, tgltrans),
       INDEX idx_kartustok_tenant_lokasi (idtenant, idlokasi),
-      INDEX idx_kartustok_kodetrans (kodetrans)
+      INDEX idx_kartustok_kodetrans (kodetrans),
+      INDEX idx_kartustok_transaksi (idtrans, jenistransaksi)
     ) ENGINE=InnoDB
   `);
 

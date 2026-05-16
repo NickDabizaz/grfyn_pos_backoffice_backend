@@ -101,8 +101,8 @@ exports.createPenyesuaian = async (req, res) => {
         const jenis = selisih > 0 ? 'K' : 'M';
         // jmlAbs: jumlah absolut selisih yang akan dicatat
         const jmlAbs = Math.abs(selisih);
-        let sql6 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
-        await conn.query(sql6, [ctx.idtenant, ctx.idlokasi, kode, item.idbarang, jmlAbs, jenis, tgltrans, `Penyesuaian ${kode}`, header.idpenyesuaianstok, 'penyesuaianstok']);
+        let sql6 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        await conn.query(sql6, [ctx.idtenant, ctx.idlokasi, kode, item.idbarang, jmlAbs, jenis, tgltrans, `Penyesuaian ${kode}`, header.idpenyesuaianstok, 'PENYESUAIANSTOK']);
       }
     }
 
@@ -243,8 +243,8 @@ exports.createSaldoAwal = async (req, res) => {
 
       // Jika qty > 0, catat sebagai stok masuk di kartustok
       if (item.jml > 0) {
-        let sql4 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
-        await conn.query(sql4, [ctx.idtenant, ctx.idlokasi, kodeSaldo, item.idbarang, item.jml, 'M', tgltrans, `Saldo Awal ${kodeSaldo}`, header.idsaldostok, 'saldostok']);
+        let sql4 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        await conn.query(sql4, [ctx.idtenant, ctx.idlokasi, kodeSaldo, item.idbarang, item.jml, 'M', tgltrans, `Saldo Awal ${kodeSaldo}`, header.idsaldostok, 'SALDOSTOK']);
       }
     }
 

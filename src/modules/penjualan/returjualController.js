@@ -72,14 +72,14 @@ exports.create = async (req, res) => {
 
       // Pergerakan stok sesuai tindaklanjut: MASUK_STOK → stok normal, MASUK_STOK_2ND → stok second
       if (item.tindaklanjut === 'MASUK_STOK') {
-        let sql4 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        let sql4 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         await conn.query(sql4,
-          [ctx.idtenant, idlokasi, kodereturjual, item.idbarang, item.jml, 'M', tgltrans, `Retur Penjualan ${kodereturjual}`, header.idreturjual, 'returjual']
+          [ctx.idtenant, idlokasi, kodereturjual, item.idbarang, item.jml, 'M', tgltrans, `Retur Penjualan ${kodereturjual}`, header.idreturjual, 'RETURJUAL']
         );
       } else if (item.tindaklanjut === 'MASUK_STOK_2ND') {
-        let sql5 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        let sql5 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         await conn.query(sql5,
-          [ctx.idtenant, idlokasi, kodereturjual, item.idbarang2nd, item.jml, 'M', tgltrans, `Retur Penjualan 2nd ${kodereturjual}`, header.idreturjual, 'returjual']
+          [ctx.idtenant, idlokasi, kodereturjual, item.idbarang2nd, item.jml, 'M', tgltrans, `Retur Penjualan 2nd ${kodereturjual}`, header.idreturjual, 'RETURJUAL']
         );
       }
       // HANGUS: tidak ada pergerakan stok — barang dianggap rusak/hilang
@@ -196,14 +196,14 @@ exports.cancel = async (req, res) => {
     // Balik semua pergerakan stok dari detail retur (MASUK → KELUAR)
     for (const dtl of details) {
       if (dtl.tindaklanjut === 'MASUK_STOK') {
-        let sql5 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        let sql5 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         await conn.query(sql5,
-          [ctx.idtenant, retur.idlokasi, `VOID-${retur.kodereturjual}`, dtl.idbarang, dtl.jml, 'K', today, `Batal Retur ${retur.kodereturjual}`, retur.idreturjual, 'returjual_void']
+          [ctx.idtenant, retur.idlokasi, `VOID-${retur.kodereturjual}`, dtl.idbarang, dtl.jml, 'K', today, `Batal Retur ${retur.kodereturjual}`, retur.idreturjual, 'RETURJUAL_VOID']
         );
       } else if (dtl.tindaklanjut === 'MASUK_STOK_2ND' && dtl.idbarang2nd) {
-        let sql6 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        let sql6 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         await conn.query(sql6,
-          [ctx.idtenant, retur.idlokasi, `VOID-${retur.kodereturjual}`, dtl.idbarang2nd, dtl.jml, 'K', today, `Batal Retur 2nd ${retur.kodereturjual}`, retur.idreturjual, 'returjual_void']
+          [ctx.idtenant, retur.idlokasi, `VOID-${retur.kodereturjual}`, dtl.idbarang2nd, dtl.jml, 'K', today, `Batal Retur 2nd ${retur.kodereturjual}`, retur.idreturjual, 'RETURJUAL_VOID']
         );
       }
     }

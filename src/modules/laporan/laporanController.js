@@ -7,18 +7,19 @@
 const { tenantQuery, getTenantContext, pool } = require('../../config/db');
 const logger = require('../../lib/logger');
 
-// GET /api/laporan/jenisref-kartustok
-exports.getJenisRef = async (req, res) => {
+// GET /api/laporan/jenistransaksi-kartustok
+exports.getJenisTransaksiKartuStok = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const sql = `SELECT DISTINCT jenisref FROM kartustok WHERE idtenant = ? AND idlokasi = ? AND jenisref IS NOT NULL AND jenisref != '' ORDER BY jenisref`;
+    const sql = `SELECT DISTINCT jenistransaksi FROM kartustok WHERE idtenant = ? AND idlokasi = ? AND jenistransaksi IS NOT NULL AND jenistransaksi != '' ORDER BY jenistransaksi`;
     const rows = await tenantQuery(sql, [ctx.idtenant, ctx.idlokasi]);
-    res.json(rows.map(r => r.jenisref));
+    res.json(rows.map(r => r.jenistransaksi));
   } catch (err) {
     logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
 };
+exports.getJenisRef = exports.getJenisTransaksiKartuStok;
 
 
 // Helper: membuat klausa LIKE multi-value untuk filter (misal "A,B,C" -> kodelokasi LIKE '%A%' OR kodelokasi LIKE '%B%')
@@ -1105,7 +1106,7 @@ exports.stok = async (req, res) => {
 exports.kartuStok = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const { idbarang, tglwal, tglakhir } = req.query;
+    const { idbarang, tglwal, tglakhir, jenistransaksi, jenisref } = req.query;
     const format = req.query.format || 'json';
 
     let sql = `SELECT ks.*, b.kodebarang, b.namabarang, b.satuankecil as satuan
@@ -1117,6 +1118,14 @@ exports.kartuStok = async (req, res) => {
     if (idbarang) { sql += ' AND ks.idbarang = ?'; params.push(idbarang); }
     if (tglwal) { sql += ' AND ks.tgltrans >= ?'; params.push(tglwal); }
     if (tglakhir) { sql += ' AND ks.tgltrans <= ?'; params.push(tglakhir); }
+    const jenisFilter = jenistransaksi || jenisref;
+    if (jenisFilter) {
+      const vals = jenisFilter.split(',').map(s => s.trim()).filter(Boolean);
+      if (vals.length) {
+        sql += ` AND ks.jenistransaksi IN (${vals.map(() => '?').join(',')})`;
+        params.push(...vals);
+      }
+    }
     sql += ' ORDER BY ks.tgltrans ASC, ks.idkartustok ASC';
 
     const rows = await tenantQuery(sql, params);

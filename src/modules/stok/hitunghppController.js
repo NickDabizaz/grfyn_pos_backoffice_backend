@@ -133,14 +133,14 @@ async function calcHPPItem(conn, ctx, idbarang, periodbulan, tglawal, tglakhir) 
     [ctx.idtenant, ctx.idlokasi, tglawal, tglakhir, idbarang]
   );
 
-  // Hitung penyesuaian stok (masuk - keluar) dari kartustok dengan jenisref 'penyesuaianstok'
+  // Hitung penyesuaian stok (masuk - keluar) dari kartustok dengan jenistransaksi 'PENYESUAIANSTOK'
   let sql5 = `SELECT
        COALESCE(SUM(CASE WHEN jenis='M' THEN jml ELSE 0 END), 0) -
        COALESCE(SUM(CASE WHEN jenis='K' THEN jml ELSE 0 END), 0) as qty_net
      FROM kartustok
      WHERE idtenant = ? AND idlokasi = ?
        AND idbarang = ?
-       AND jenisref = 'penyesuaianstok'
+       AND jenistransaksi = 'PENYESUAIANSTOK'
        AND tgltrans BETWEEN ? AND ?`;
   const [[adj]] = await conn.query(sql5,
     [ctx.idtenant, ctx.idlokasi, idbarang, tglawal, tglakhir]

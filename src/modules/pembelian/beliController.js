@@ -47,6 +47,34 @@ async function assertBpbCanBeUsed(conn, { idbpb, idtenant, currentIdbeli = null 
 }
 
 // POST /beli — Buat transaksi pembelian baru
+function isAutoLunasBeli(beli) {
+  return beli.is_lunaslangsung === 1
+    || beli.is_lunaslangsung === true
+    || ['BELI LUNAS', 'PEMBELIAN LUNAS', 'PEMBELIAN LANGSUNG LUNAS', 'PEMBELIAN PESANAN LUNAS'].includes(beli.jenistransaksi);
+}
+
+async function deletePostedBeli(conn, { idtenant, beli }) {
+  if (isAutoLunasBeli(beli)) {
+    await conn.query(
+      `DELETE ph, phdtl
+       FROM pelunasanhutang ph
+       JOIN pelunasanhutangdtl phdtl ON ph.idpelunasan = phdtl.idpelunasan
+       WHERE phdtl.kodetrans = ? AND ph.idtenant = ?`,
+      [beli.kodebeli, idtenant]
+    );
+  }
+
+  await conn.query('DELETE FROM kartuhutang WHERE kodetrans = ? AND idtenant = ?', [beli.kodebeli, idtenant]);
+  await conn.query(
+    "DELETE FROM kartustok WHERE idtrans = ? AND jenistransaksi = 'BELI' AND idtenant = ?",
+    [beli.idbeli, idtenant]
+  );
+  await conn.query(
+    "UPDATE hargabeli SET status = 'CANCELLED' WHERE idref = ? AND koderef = ? AND jenisref = 'BELI' AND idtenant = ?",
+    [beli.idbeli, beli.kodebeli, idtenant]
+  );
+}
+
 exports.create = async (req, res) => {
   const conn = await getConnection();
   try {
@@ -133,8 +161,8 @@ exports.create = async (req, res) => {
         const jmlStokKecil   = barangInfo ? toKecilJml(jml, item.satuan, barangInfo) : jml;
 
         const queryInsertStok = `
-          INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) 
-          VALUES (?, ?, ?, ?, ?, 'M', ?, ?, ?, 'beli')
+          INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi) 
+          VALUES (?, ?, ?, ?, ?, 'M', ?, ?, ?, 'BELI')
         `;
         await conn.query(queryInsertStok, [
           ctx.idtenant, idlokasi, kodebeli, item.idbarang, jmlStokKecil, tgltrans, `Pembelian ${kodebeli}`, idbeli
@@ -143,7 +171,7 @@ exports.create = async (req, res) => {
         // Update History Harga Beli (Jika Berubah)
         const [[latestHarga]] = await conn.query("SELECT hargabeli FROM hargabeli WHERE idbarang = ? AND idtenant = ? AND status = 'AKTIF' ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1", [item.idbarang, ctx.idtenant]);
         if (!latestHarga || parseFloat(latestHarga.hargabeli) !== harga) {
-          await conn.query('INSERT INTO hargabeli (idtenant, idbarang, hargabeli, tgltrans, idref, koderef, jenisref, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [ctx.idtenant, item.idbarang, harga, tgltrans, idbeli, kodebeli, 'beli', 'AKTIF']);
+          await conn.query('INSERT INTO hargabeli (idtenant, idbarang, hargabeli, tgltrans, idref, koderef, jenisref, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [ctx.idtenant, item.idbarang, harga, tgltrans, idbeli, kodebeli, 'BELI', 'AKTIF']);
         }
       }
     }
@@ -376,7 +404,7 @@ exports.update = async (req, res) => {
     
     // Hapus kartuhutang, stok, dan detail lama
     await conn.query('DELETE FROM kartuhutang WHERE kodetrans = ? AND idtenant = ?', [kodebeli, ctx.idtenant]);
-    await conn.query("DELETE FROM kartustok WHERE idref = ? AND jenisref = 'beli' AND idtenant = ?", [id, ctx.idtenant]);
+    await conn.query("DELETE FROM kartustok WHERE idtrans = ? AND jenistransaksi = 'BELI' AND idtenant = ?", [id, ctx.idtenant]);
     await conn.query('DELETE FROM belidtl WHERE idbeli = ? AND idtenant = ?', [id, ctx.idtenant]);
 
     // 3. Update Header Beli (TERMASUK UPDATE LOKASI & SUPPLIER)
@@ -414,14 +442,14 @@ exports.update = async (req, res) => {
         const jmlStokKecil   = barangInfo ? toKecilJml(jml, item.satuan, barangInfo) : jml;
 
         await conn.query(
-          'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [ctx.idtenant, idlokasi, kodebeli, item.idbarang, jmlStokKecil, 'M', tgltrans, `Pembelian ${kodebeli}`, id, 'beli']
+          'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [ctx.idtenant, idlokasi, kodebeli, item.idbarang, jmlStokKecil, 'M', tgltrans, `Pembelian ${kodebeli}`, id, 'BELI']
         );
 
         // Update History Harga
         const [[latestHarga]] = await conn.query("SELECT hargabeli FROM hargabeli WHERE idbarang = ? AND idtenant = ? AND status = 'AKTIF' ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1", [item.idbarang, ctx.idtenant]);
         if (!latestHarga || parseFloat(latestHarga.hargabeli) !== harga) {
-          await conn.query('INSERT INTO hargabeli (idtenant, idbarang, hargabeli, tgltrans, idref, koderef, jenisref, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [ctx.idtenant, item.idbarang, harga, tgltrans, id, kodebeli, 'beli', 'AKTIF']);
+          await conn.query('INSERT INTO hargabeli (idtenant, idbarang, hargabeli, tgltrans, idref, koderef, jenisref, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [ctx.idtenant, item.idbarang, harga, tgltrans, id, kodebeli, 'BELI', 'AKTIF']);
         }
       }
     }
@@ -492,14 +520,14 @@ exports.checkEdit = async (req, res) => {
 
     // Cek apakah hutang pembelian ini sudah lunas di tabel kartuhutang
     const queryCheck = `
-      SELECT kh.status, b.jenistransaksi
+      SELECT kh.status, b.jenistransaksi, b.is_lunaslangsung
       FROM beli b
       LEFT JOIN kartuhutang kh ON kh.kodetrans = b.kodebeli AND kh.jenis = 'BELI' AND kh.idtenant = b.idtenant
       WHERE b.idbeli = ? AND b.idtenant = ?
     `;
     const hutangRows = await tenantQuery(queryCheck, [id, ctx.idtenant]);
 
-    if (hutangRows && hutangRows.length > 0 && hutangRows[0].status === 'LUNAS' && !['BELI LUNAS', 'PEMBELIAN LUNAS'].includes(hutangRows[0].jenistransaksi)) {
+    if (hutangRows && hutangRows.length > 0 && hutangRows[0].status === 'LUNAS' && !isAutoLunasBeli(hutangRows[0])) {
       return res.status(400).json({ 
         canEdit: false, 
         reason: 'HUTANG_LUNAS', 
@@ -532,56 +560,73 @@ exports.cancel = async (req, res) => {
       await conn.rollback();
       return res.status(400).json({ message: 'Pembelian sudah dibatalkan' });
     }
-    if (beli.status === 'DRAFT') {
-      await conn.query("UPDATE beli SET status = 'CANCELLED' WHERE idbeli = ? AND idtenant = ?", [id, ctx.idtenant]);
-      await conn.commit();
-      await logger.history('BELI_CANCEL', { idtenant: ctx.idtenant, idlokasi: beli.idlokasi, iduser: ctx.iduser, ref: beli.kodebeli, req });
-      return res.json({ message: 'Pembelian berhasil dibatalkan' });
-    }
-
-    // Validasi: Tolak void jika hutang sudah LUNAS
-    const [[hutangLunas]] = await conn.query("SELECT idkartuhutang FROM kartuhutang WHERE kodetrans = ? AND jenis = 'BELI' AND status = 'LUNAS' AND idtenant = ?", [beli.kodebeli, ctx.idtenant]);
-    if (hutangLunas && !['BELI LUNAS', 'PEMBELIAN LUNAS'].includes(beli.jenistransaksi)) {
+    if (beli.status !== 'DRAFT') {
       await conn.rollback();
-      return res.status(400).json({ message: 'Hapus pelunasan hutang terlebih dahulu sebelum membatalkan' });
+      return res.status(400).json({ message: 'Pembelian APPROVED harus batal approve dulu sebelum dihapus' });
     }
 
-    if (['BELI LUNAS', 'PEMBELIAN LUNAS'].includes(beli.jenistransaksi)) {
-      await conn.query(
-        `DELETE ph, phdtl
-         FROM pelunasanhutang ph
-         JOIN pelunasanhutangdtl phdtl ON ph.idpelunasan = phdtl.idpelunasan
-         WHERE phdtl.kodetrans = ? AND ph.idtenant = ?`,
-        [beli.kodebeli, ctx.idtenant]
-      );
-    }
-
-    // 1. Ubah status jadi CANCELLED
     await conn.query("UPDATE beli SET status = 'CANCELLED' WHERE idbeli = ? AND idtenant = ?", [id, ctx.idtenant]);
-
-    // 2. Hapus tagihan (Kartu Hutang)
-    await conn.query('DELETE FROM kartuhutang WHERE kodetrans = ? AND idtenant = ?', [beli.kodebeli, ctx.idtenant]);
-
-    // 3. Balik Stok: Catat keluar (K) sesuai jumlah item yang tadinya masuk
-    const [details] = await conn.query('SELECT * FROM belidtl WHERE idbeli = ? AND idtenant = ?', [id, ctx.idtenant]);
-    const today     = new Date().toISOString().slice(0, 10);
-    
-    for (const dtl of details) {
-      await conn.query(
-        'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [ctx.idtenant, beli.idlokasi, `CANCEL-${beli.kodebeli}`, dtl.idbarang, dtl.jml, 'K', today, `Pembatalan ${beli.kodebeli}`, beli.idbeli, 'beli_cancel']
-      );
+    if (beli.idbpb) {
+      await conn.query("UPDATE bpb SET status = 'APPROVED' WHERE idbpb = ? AND idtenant = ?", [beli.idbpb, ctx.idtenant]);
     }
-
-    await conn.query(
-      "UPDATE hargabeli SET status = 'CANCELLED' WHERE idref = ? AND koderef = ? AND jenisref = 'beli' AND idtenant = ?",
-      [beli.idbeli, beli.kodebeli, ctx.idtenant]
-    );
 
     await conn.commit();
     await logger.history('BELI_CANCEL', { idtenant: ctx.idtenant, idlokasi: beli.idlokasi, iduser: ctx.iduser, ref: beli.kodebeli, req });
     
     res.json({ message: 'Pembelian berhasil dibatalkan' });
+  } catch (err) {
+    await conn.rollback();
+    logger.error(err, { req });
+    res.status(err.statusCode || 500).json({ message: err.message });
+  } finally {
+    conn.release();
+  }
+};
+
+exports.unapprove = async (req, res) => {
+  const conn = await getConnection();
+  try {
+    const ctx = getTenantContext();
+    await conn.beginTransaction();
+    const { id } = req.params;
+
+    const [[beli]] = await conn.query('SELECT * FROM beli WHERE idbeli = ? AND idtenant = ?', [id, ctx.idtenant]);
+    if (!beli) {
+      await conn.rollback();
+      return res.status(404).json({ message: 'Pembelian tidak ditemukan' });
+    }
+    if (beli.status !== 'APPROVED') {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Hanya Pembelian APPROVED yang bisa batal approve' });
+    }
+
+    const [[hutangLunas]] = await conn.query(
+      "SELECT idkartuhutang FROM kartuhutang WHERE kodetrans = ? AND jenis = 'BELI' AND status = 'LUNAS' AND idtenant = ?",
+      [beli.kodebeli, ctx.idtenant]
+    );
+    if (hutangLunas && !isAutoLunasBeli(beli)) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Hapus pelunasan hutang terlebih dahulu sebelum batal approve' });
+    }
+
+    const [returs] = await conn.query(
+      "SELECT kodereturbeli FROM returbeli WHERE idbeli = ? AND idtenant = ? AND status != 'CANCELLED'",
+      [beli.idbeli, ctx.idtenant]
+    );
+    if (returs.length > 0) {
+      await conn.rollback();
+      return res.status(400).json({
+        message: 'Pembelian sudah diretur, batalkan retur aktif terlebih dahulu',
+        returs: returs.map(r => r.kodereturbeli),
+      });
+    }
+
+    await deletePostedBeli(conn, { idtenant: ctx.idtenant, beli });
+    await conn.query("UPDATE beli SET status = 'DRAFT', bayar = 0 WHERE idbeli = ? AND idtenant = ?", [id, ctx.idtenant]);
+
+    await conn.commit();
+    await logger.history('BELI_UNAPPROVE', { idtenant: ctx.idtenant, idlokasi: beli.idlokasi, iduser: ctx.iduser, ref: beli.kodebeli, req });
+    res.json({ message: 'Approve Pembelian dibatalkan' });
   } catch (err) {
     await conn.rollback();
     logger.error(err, { req });

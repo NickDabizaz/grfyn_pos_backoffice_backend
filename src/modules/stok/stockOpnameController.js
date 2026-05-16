@@ -184,8 +184,8 @@ exports.finalize = async (req, res) => {
 
         const jenis = selisih > 0 ? 'M' : 'K';
         await conn.query(
-          `INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'stockopname')`,
+          `INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'STOCKOPNAME')`,
           [ctx.idtenant, ctx.idlokasi, kodepenyesuaian, dtl.idbarang, Math.abs(selisih), jenis, tgl, `Opname ${opname.kodestockopname}`, idpenyesuaian]
         );
       }

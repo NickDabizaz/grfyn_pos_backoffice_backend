@@ -484,10 +484,10 @@ exports.importJualBatch = async (req, res) => {
           [header.idjual, ctx.idtenant, item.idbarang, item.jml, item.harga, ppnAmount, item.diskon || 0, subtotal]
         );
 
-        let sqlInsStok = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        let sqlInsStok = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         await conn.query(
           sqlInsStok,
-          [ctx.idtenant, group.idlokasi, effectiveKode, item.idbarang, item.jml, 'K', group.tgltrans, `Penjualan ${effectiveKode}`, header.idjual, 'jual']
+          [ctx.idtenant, group.idlokasi, effectiveKode, item.idbarang, item.jml, 'K', group.tgltrans, `Penjualan ${effectiveKode}`, header.idjual, 'JUAL']
         );
 
         let sqlLatestJual = 'SELECT hargajual FROM hargajual WHERE idbarang = ? AND idtenant = ? ORDER BY tgltrans DESC, idhargajual DESC LIMIT 1';
@@ -519,12 +519,12 @@ exports.importJualBatch = async (req, res) => {
       if (akunKas) {
         let sqlJurnalDebet = 'INSERT INTO jurnal (idtenant, idlokasi, idtrans, kodetrans, jenis, idakun, posisi, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
         await conn.query(sqlJurnalDebet,
-          [ctx.idtenant, group.idlokasi, header.idjual, effectiveKode, 'jual', akunKas.idakun, 'DEBET', calculatedGrandTotal]);
+          [ctx.idtenant, group.idlokasi, header.idjual, effectiveKode, 'JUAL', akunKas.idakun, 'DEBET', calculatedGrandTotal]);
       }
       if (akunJual) {
         let sqlJurnalKredit = 'INSERT INTO jurnal (idtenant, idlokasi, idtrans, kodetrans, jenis, idakun, posisi, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
         await conn.query(sqlJurnalKredit,
-          [ctx.idtenant, group.idlokasi, header.idjual, effectiveKode, 'jual', akunJual.idakun, 'KREDIT', calculatedGrandTotal]);
+          [ctx.idtenant, group.idlokasi, header.idjual, effectiveKode, 'JUAL', akunJual.idakun, 'KREDIT', calculatedGrandTotal]);
       }
 
       totalTransactions++;

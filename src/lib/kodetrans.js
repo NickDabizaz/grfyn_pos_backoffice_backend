@@ -28,6 +28,8 @@ async function generateKode(conn, prefix, idtenant, idlokasi, table, column) {
   let sql2 = `LOCK TABLES ${table} WRITE`;
   await conn.query(sql2);
 
+  table = table.toLowerCase(); // Pastikan nama tabel dalam query sesuai dengan yang ada di database (case-sensitive)
+
   try {
     // Cari nomor terakhir untuk prefix+kodelokasi+tanggal yang sama
     let sql3 = `SELECT MAX(${column}) as maxKode FROM ${table}

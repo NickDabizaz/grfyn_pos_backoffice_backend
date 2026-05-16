@@ -83,7 +83,7 @@ exports.create = async (req, res) => {
       calculatedGrandTotal += subtotal;
 
       jualdtlRows.push([idjual, ctx.idtenant, item.idbarang, item.jml, item.satuan, harga, ppnAmount, item.diskon || 0, subtotal]);
-      kartustokRows.push([ctx.idtenant, idlokasi, kodejual, item.idbarang, item.jml, 'K', tgltrans, `Penjualan ${kodejual}`, idjual, 'jual']);
+      kartustokRows.push([ctx.idtenant, idlokasi, kodejual, item.idbarang, item.jml, 'K', tgltrans, `Penjualan ${kodejual}`, idjual, 'JUAL']);
 
       if (hargaMap[item.idbarang] === undefined || hargaMap[item.idbarang] !== harga) {
         hargaBaruRows.push([ctx.idtenant, item.idbarang, harga, tgltrans]);
@@ -92,7 +92,7 @@ exports.create = async (req, res) => {
 
     // Batch inserts — satu query per tabel
     await conn.query('INSERT INTO jualdtl (idjual, idtenant, idbarang, jml, satuan, harga, ppn, diskon, subtotal) VALUES ?', [jualdtlRows]);
-    await conn.query('INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES ?', [kartustokRows]);
+    await conn.query('INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi) VALUES ?', [kartustokRows]);
     if (hargaBaruRows.length) {
       await conn.query('INSERT INTO hargajual (idtenant, idbarang, hargajual, tgltrans) VALUES ?', [hargaBaruRows]);
     }
@@ -115,11 +115,11 @@ exports.create = async (req, res) => {
     const [[akunJual]] = await conn.query(sql10, [ctx.idtenant]);
     if (akunKas) {
       let sql11 = 'INSERT INTO jurnal (idtenant, idlokasi, idtrans, kodetrans, jenis, tgltrans, idakun, posisi, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
-      await conn.query(sql11, [ctx.idtenant, idlokasi, idjual, kodejual, 'jual', tgltrans, akunKas.idakun, 'DEBET', calculatedGrandTotal]);
+      await conn.query(sql11, [ctx.idtenant, idlokasi, idjual, kodejual, 'JUAL', tgltrans, akunKas.idakun, 'DEBET', calculatedGrandTotal]);
     }
     if (akunJual) {
       let sql12 = 'INSERT INTO jurnal (idtenant, idlokasi, idtrans, kodetrans, jenis, tgltrans, idakun, posisi, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
-      await conn.query(sql12, [ctx.idtenant, idlokasi, idjual, kodejual, 'jual', tgltrans, akunJual.idakun, 'KREDIT', calculatedGrandTotal]);
+      await conn.query(sql12, [ctx.idtenant, idlokasi, idjual, kodejual, 'JUAL', tgltrans, akunJual.idakun, 'KREDIT', calculatedGrandTotal]);
     }
 
     // Catat ke kartu piutang dengan status OPEN (tunggakan customer)
@@ -374,18 +374,18 @@ exports.cancel = async (req, res) => {
     await conn.query(sql28, [jual.kodejual, ctx.idtenant, jual.idlokasi]);
 
     // Nonaktifkan entri jurnal terkait
-    let sql29 = "UPDATE jurnal SET status = 'NONAKTIF' WHERE kodetrans = ? AND jenis = 'jual' AND idtenant = ? AND idlokasi = ?";
+    let sql29 = "UPDATE jurnal SET status = 'NONAKTIF' WHERE kodetrans = ? AND jenis = 'JUAL' AND idtenant = ? AND idlokasi = ?";
     await conn.query(sql29, [jual.kodejual, ctx.idtenant, jual.idlokasi]);
 
     // Balik stok: catat pergerakan masuk (M) untuk setiap item yang dijual
     let sql30 = 'SELECT * FROM jualdtl WHERE idjual = ? AND idtenant = ?';
     const [details] = await conn.query(sql30, [id, ctx.idtenant]);
     const today = new Date().toISOString().slice(0, 10);
-    let sql31 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+    let sql31 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
     for (const dtl of details) {
       await conn.query(
         sql31,
-        [ctx.idtenant, jual.idlokasi, `VOID-${jual.kodejual}`, dtl.idbarang, dtl.jml, 'M', today, `Pembatalan ${jual.kodejual}`, jual.idjual, 'jual_void']
+        [ctx.idtenant, jual.idlokasi, `VOID-${jual.kodejual}`, dtl.idbarang, dtl.jml, 'M', today, `Pembatalan ${jual.kodejual}`, jual.idjual, 'JUAL_VOID']
       );
     }
 
@@ -477,16 +477,16 @@ exports.update = async (req, res) => {
       [oldJual.kodejual, ctx.idtenant, oldJual.idlokasi]
     );
 
-    let sql36 = 'DELETE FROM kartustok WHERE idref = ? AND jenisref = ? AND idtenant = ? AND idlokasi = ?';
+    let sql36 = 'DELETE FROM kartustok WHERE idtrans = ? AND jenistransaksi = ? AND idtenant = ? AND idlokasi = ?';
     await conn.query(
       sql36,
-      [id, 'jual', ctx.idtenant, oldJual.idlokasi]
+      [id, 'JUAL', ctx.idtenant, oldJual.idlokasi]
     );
 
     let sql37 = 'DELETE FROM jualdtl WHERE idjual = ? AND idtenant = ?';
     await conn.query(sql37, [id, ctx.idtenant]);
 
-    let sql38 = "DELETE FROM jurnal WHERE kodetrans = ? AND jenis = 'jual' AND idtenant = ? AND idlokasi = ?";
+    let sql38 = "DELETE FROM jurnal WHERE kodetrans = ? AND jenis = 'JUAL' AND idtenant = ? AND idlokasi = ?";
     await conn.query(
       sql38,
       [oldJual.kodejual, ctx.idtenant, oldJual.idlokasi]
@@ -502,7 +502,7 @@ exports.update = async (req, res) => {
     // Pre-compile query untuk insert ulang detail & stok
     let sql40 = 'SELECT hargajual FROM hargajual WHERE idbarang = ? AND idtenant = ? ORDER BY tgltrans DESC, idhargajual DESC LIMIT 1';
     let sql41 = 'INSERT INTO jualdtl (idjual, idtenant, idbarang, jml, satuan, harga, ppn, diskon, subtotal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
-    let sql42 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+    let sql42 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
     let sql43 = 'INSERT INTO hargajual (idtenant, idbarang, hargajual, tgltrans) VALUES (?, ?, ?, ?)';
 
     // Iterasi item baru: hitung ulang PPN, diskon, subtotal
@@ -528,7 +528,7 @@ exports.update = async (req, res) => {
       // Catat stok keluar (K)
       await conn.query(
         sql42,
-        [ctx.idtenant, idlokasi, oldJual.kodejual, item.idbarang, item.jml, 'K', today, `Penjualan ${oldJual.kodejual}`, oldJual.idjual, 'jual']
+        [ctx.idtenant, idlokasi, oldJual.kodejual, item.idbarang, item.jml, 'K', today, `Penjualan ${oldJual.kodejual}`, oldJual.idjual, 'JUAL']
       );
 
       // Update history harga jual jika berubah
@@ -564,14 +564,14 @@ exports.update = async (req, res) => {
       let sql47 = 'INSERT INTO jurnal (idtenant, idlokasi, idtrans, kodetrans, jenis, tgltrans, idakun, posisi, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
       await conn.query(
         sql47,
-        [ctx.idtenant, idlokasi, oldJual.idjual, oldJual.kodejual, 'jual', today, akunKas.idakun, 'DEBET', calculatedGrandTotal]
+        [ctx.idtenant, idlokasi, oldJual.idjual, oldJual.kodejual, 'JUAL', today, akunKas.idakun, 'DEBET', calculatedGrandTotal]
       );
     }
     if (akunJual) {
       let sql48 = 'INSERT INTO jurnal (idtenant, idlokasi, idtrans, kodetrans, jenis, tgltrans, idakun, posisi, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
       await conn.query(
         sql48,
-        [ctx.idtenant, idlokasi, oldJual.idjual, oldJual.kodejual, 'jual', today, akunJual.idakun, 'KREDIT', calculatedGrandTotal]
+        [ctx.idtenant, idlokasi, oldJual.idjual, oldJual.kodejual, 'JUAL', today, akunJual.idakun, 'KREDIT', calculatedGrandTotal]
       );
     }
 

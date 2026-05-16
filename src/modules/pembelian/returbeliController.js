@@ -33,8 +33,8 @@ async function postApprovedRetur(conn, { idtenant, idlokasi, idsupplier, koderet
 
   for (const item of details) {
     await conn.query(
-      'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [idtenant, idlokasi, kodereturbeli, item.idbarang, item.jml, 'K', tgltrans, `Retur Pembelian ${kodereturbeli}`, idreturbeli, 'returbeli']
+      'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [idtenant, idlokasi, kodereturbeli, item.idbarang, item.jml, 'K', tgltrans, `Retur Pembelian ${kodereturbeli}`, idreturbeli, 'RETURBELI']
     );
   }
 
@@ -49,6 +49,10 @@ async function postApprovedRetur(conn, { idtenant, idlokasi, idsupplier, koderet
 async function deletePostedRetur(conn, { idtenant, idlokasi, kodereturbeli }) {
   await conn.query(
     "DELETE FROM kartuhutang WHERE kodetransreferensi = ? AND idtenant = ? AND idlokasi = ? AND jenis = 'RETUR'",
+    [kodereturbeli, idtenant, idlokasi]
+  );
+  await conn.query(
+    "DELETE FROM kartustok WHERE kodetrans = ? AND jenistransaksi = 'RETURBELI' AND idtenant = ? AND idlokasi = ?",
     [kodereturbeli, idtenant, idlokasi]
   );
 }
@@ -267,32 +271,15 @@ exports.cancel = async (req, res) => {
       await conn.rollback();
       return res.status(400).json({ message: 'Retur pembelian sudah dibatalkan' });
     }
+    if (retur.status !== 'DRAFT') {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Retur Pembelian APPROVED harus batal approve dulu sebelum dihapus' });
+    }
 
     await conn.query(
       'UPDATE returbeli SET status = ? WHERE idreturbeli = ? AND idtenant = ? AND idlokasi = ?',
       ['CANCELLED', id, ctx.idtenant, retur.idlokasi]
     );
-
-    if (retur.status === 'APPROVED' || retur.status === 'AKTIF') {
-      await deletePostedRetur(conn, {
-        idtenant: ctx.idtenant,
-        idlokasi: retur.idlokasi,
-        kodereturbeli: retur.kodereturbeli,
-      });
-
-      const [details] = await conn.query(
-        'SELECT * FROM returbelidtl WHERE idreturbeli = ? AND idtenant = ?',
-        [id, ctx.idtenant]
-      );
-      const today = new Date().toISOString().slice(0, 10);
-
-      for (const dtl of details) {
-        await conn.query(
-          'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [ctx.idtenant, retur.idlokasi, `CANCEL-${retur.kodereturbeli}`, dtl.idbarang, dtl.jml, 'M', today, `Batal Retur Beli ${retur.kodereturbeli}`, retur.idreturbeli, 'returbeli_cancel']
-        );
-      }
-    }
 
     await conn.commit();
     await logger.history('RETURBELI_CANCEL', { idtenant: ctx.idtenant, idlokasi: retur.idlokasi, iduser: ctx.iduser, ref: retur.kodereturbeli, req });
@@ -331,19 +318,6 @@ exports.unapprove = async (req, res) => {
       idlokasi: retur.idlokasi,
       kodereturbeli: retur.kodereturbeli,
     });
-
-    const [details] = await conn.query(
-      'SELECT * FROM returbelidtl WHERE idreturbeli = ? AND idtenant = ?',
-      [id, ctx.idtenant]
-    );
-    const today = new Date().toISOString().slice(0, 10);
-
-    for (const dtl of details) {
-      await conn.query(
-        'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [ctx.idtenant, retur.idlokasi, `UNAPPROVE-${retur.kodereturbeli}`, dtl.idbarang, dtl.jml, 'M', today, `Batal Approve Retur Beli ${retur.kodereturbeli}`, retur.idreturbeli, 'returbeli_unapprove']
-      );
-    }
 
     await conn.query(
       "UPDATE returbeli SET status = 'DRAFT' WHERE idreturbeli = ? AND idtenant = ?",

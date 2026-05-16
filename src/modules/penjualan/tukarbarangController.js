@@ -71,14 +71,14 @@ exports.create = async (req, res) => {
       );
 
       if (item.tindaklanjut === 'MASUK_STOK') {
-        let sql4 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        let sql4 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         await conn.query(sql4,
-          [ctx.idtenant, idlokasi, kodetukarbarang, item.idbarang, item.jml, 'M', tgltrans, `Tukar Barang Kembali ${kodetukarbarang}`, header.idtukarbarang, 'tukarbarang']
+          [ctx.idtenant, idlokasi, kodetukarbarang, item.idbarang, item.jml, 'M', tgltrans, `Tukar Barang Kembali ${kodetukarbarang}`, header.idtukarbarang, 'TUKARBARANG']
         );
       } else if (item.tindaklanjut === 'MASUK_STOK_2ND') {
-        let sql5 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        let sql5 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         await conn.query(sql5,
-          [ctx.idtenant, idlokasi, kodetukarbarang, item.idbarang2nd, item.jml, 'M', tgltrans, `Tukar Barang Kembali 2nd ${kodetukarbarang}`, header.idtukarbarang, 'tukarbarang']
+          [ctx.idtenant, idlokasi, kodetukarbarang, item.idbarang2nd, item.jml, 'M', tgltrans, `Tukar Barang Kembali 2nd ${kodetukarbarang}`, header.idtukarbarang, 'TUKARBARANG']
         );
       }
       // HANGUS: tidak ada pergerakan stok — barang dianggap rusak/hilang
@@ -93,9 +93,9 @@ exports.create = async (req, res) => {
         [header.idtukarbarang, ctx.idtenant, item.idbarang, item.jml, item.harga || 0, subtotal]
       );
 
-      let sql7 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+      let sql7 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
       await conn.query(sql7,
-        [ctx.idtenant, idlokasi, kodetukarbarang, item.idbarang, item.jml, 'K', tgltrans, `Tukar Barang Baru ${kodetukarbarang}`, header.idtukarbarang, 'tukarbarang']
+        [ctx.idtenant, idlokasi, kodetukarbarang, item.idbarang, item.jml, 'K', tgltrans, `Tukar Barang Baru ${kodetukarbarang}`, header.idtukarbarang, 'TUKARBARANG']
       );
     }
 
@@ -198,14 +198,14 @@ exports.cancel = async (req, res) => {
     const [itemsKembali] = await conn.query(sql3, [id, ctx.idtenant]);
     for (const dtl of itemsKembali) {
       if (dtl.tindaklanjut === 'MASUK_STOK') {
-        let sql4 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        let sql4 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         await conn.query(sql4,
-          [ctx.idtenant, tukar.idlokasi, `VOID-${tukar.kodetukarbarang}`, dtl.idbarang, dtl.jml, 'K', today, `Batal Tukar Barang ${tukar.kodetukarbarang}`, tukar.idtukarbarang, 'tukarbarang_void']
+          [ctx.idtenant, tukar.idlokasi, `VOID-${tukar.kodetukarbarang}`, dtl.idbarang, dtl.jml, 'K', today, `Batal Tukar Barang ${tukar.kodetukarbarang}`, tukar.idtukarbarang, 'TUKARBARANG_VOID']
         );
       } else if (dtl.tindaklanjut === 'MASUK_STOK_2ND' && dtl.idbarang2nd) {
-        let sql5 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        let sql5 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         await conn.query(sql5,
-          [ctx.idtenant, tukar.idlokasi, `VOID-${tukar.kodetukarbarang}`, dtl.idbarang2nd, dtl.jml, 'K', today, `Batal Tukar Barang 2nd ${tukar.kodetukarbarang}`, tukar.idtukarbarang, 'tukarbarang_void']
+          [ctx.idtenant, tukar.idlokasi, `VOID-${tukar.kodetukarbarang}`, dtl.idbarang2nd, dtl.jml, 'K', today, `Batal Tukar Barang 2nd ${tukar.kodetukarbarang}`, tukar.idtukarbarang, 'TUKARBARANG_VOID']
         );
       }
     }
@@ -214,9 +214,9 @@ exports.cancel = async (req, res) => {
     let sql6 = 'SELECT * FROM tukarbarangdtl_baru WHERE idtukarbarang = ? AND idtenant = ?';
     const [itemsBaru] = await conn.query(sql6, [id, ctx.idtenant]);
     for (const dtl of itemsBaru) {
-      let sql7 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+      let sql7 = 'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
       await conn.query(sql7,
-        [ctx.idtenant, tukar.idlokasi, `VOID-${tukar.kodetukarbarang}`, dtl.idbarang, dtl.jml, 'M', today, `Batal Tukar Barang Baru ${tukar.kodetukarbarang}`, tukar.idtukarbarang, 'tukarbarang_void']
+        [ctx.idtenant, tukar.idlokasi, `VOID-${tukar.kodetukarbarang}`, dtl.idbarang, dtl.jml, 'M', today, `Batal Tukar Barang Baru ${tukar.kodetukarbarang}`, tukar.idtukarbarang, 'TUKARBARANG_VOID']
       );
     }
 

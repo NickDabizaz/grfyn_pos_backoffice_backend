@@ -61,7 +61,7 @@
         <td class="right"><%= row.jenis === 'M' ? row.jml : '-' %></td>
         <td class="right"><%= row.jenis === 'K' ? row.jml : '-' %></td>
         <td class="right"><%= saldo %></td>
-        <td><%= row.keterangan || '-' %> (<%= row.jenisref || '-' %>) - <%= new Date(row.tgltrans).toLocaleDateString('id-ID') %></td>
+        <td><%= row.keterangan || '-' %> (<%= row.jenistransaksi || '-' %>) - <%= new Date(row.tgltrans).toLocaleDateString('id-ID') %></td>
       </tr>
       <% }); %>
       <% if(data.length === 0) { %>

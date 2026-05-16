@@ -116,8 +116,8 @@ exports.kirim = async (req, res) => {
     const tgl = new Date().toISOString().slice(0, 10);
     for (const item of items) {
       await conn.query(
-        `INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref)
-         VALUES (?, ?, ?, ?, ?, 'K', ?, ?, ?, 'transferstok_keluar')`,
+        `INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi)
+         VALUES (?, ?, ?, ?, ?, 'K', ?, ?, ?, 'TRANSFERSTOK_KELUAR')`,
         [ctx.idtenant, ctx.idlokasi, ts.kodetransferstok, item.idbarang, item.jml, tgl, `Transfer Keluar ${ts.kodetransferstok}`, ts.idtransferstok]
       );
     }
@@ -162,8 +162,8 @@ exports.terima = async (req, res) => {
     const tgl = new Date().toISOString().slice(0, 10);
     for (const item of items) {
       await conn.query(
-        `INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref)
-         VALUES (?, ?, ?, ?, ?, 'M', ?, ?, ?, 'transferstok_masuk')`,
+        `INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi)
+         VALUES (?, ?, ?, ?, ?, 'M', ?, ?, ?, 'TRANSFERSTOK_MASUK')`,
         [ctx.idtenant, ts.idlokasitujuan, ts.kodetransferstok, item.idbarang, item.jml, tgl, `Transfer Masuk ${ts.kodetransferstok}`, ts.idtransferstok]
       );
     }
@@ -209,8 +209,8 @@ exports.batal = async (req, res) => {
       const tgl = new Date().toISOString().slice(0, 10);
       for (const item of items) {
         await conn.query(
-          `INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref)
-           VALUES (?, ?, ?, ?, ?, 'M', ?, ?, ?, 'transferstok_batal')`,
+          `INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi)
+           VALUES (?, ?, ?, ?, ?, 'M', ?, ?, ?, 'TRANSFERSTOK_BATAL')`,
           [ctx.idtenant, ctx.idlokasi, `BATAL-${ts.kodetransferstok}`, item.idbarang, item.jml, tgl, `Batal Transfer ${ts.kodetransferstok}`, ts.idtransferstok]
         );
       }

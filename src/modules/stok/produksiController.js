@@ -60,7 +60,7 @@ function validateItems(items) {
 
 // helper function untuk melakukan pengecekan stok
 async function checkStock(conn, idbarang, idtenant, idlokasi, jml, namabarang, excludeIdproduksi = null) {
-  const excludeClause = excludeIdproduksi ? 'AND NOT (jenisref = "produksi" AND idref = ?)' : '';
+  const excludeClause = excludeIdproduksi ? 'AND NOT (jenistransaksi = "PRODUKSI" AND idtrans = ?)' : '';
   
   const query = `
     SELECT (
@@ -186,7 +186,7 @@ exports.create = async (req, res) => {
       (idproduksi, idtenant, idbarang, jenisbarang, jml, satuan, harga_satuan, subtotal)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
     const insertKartustokQuery = `INSERT INTO kartustok
-      (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref)
+      (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
     for (const item of items) {
@@ -207,7 +207,7 @@ exports.create = async (req, res) => {
       
       await conn.query(insertKartustokQuery, [
         ctx.idtenant, ctx.idlokasi, kodeproduksi, item.idbarang, jmlKecil,
-        jenisStok, today, `Produksi ${kodeproduksi}`, idproduksi, 'produksi'
+        jenisStok, today, `Produksi ${kodeproduksi}`, idproduksi, 'PRODUKSI'
       ]);
     }
 
@@ -361,8 +361,8 @@ exports.update = async (req, res) => {
 
     // 5. Hapus kartustok lama
     const deleteKartustokQuery = `DELETE FROM kartustok
-      WHERE idref = ? AND jenisref = ? AND idtenant = ? AND idlokasi = ?`;
-    await conn.query(deleteKartustokQuery, [id, 'produksi', ctx.idtenant, ctx.idlokasi]);
+      WHERE idtrans = ? AND jenistransaksi = ? AND idtenant = ? AND idlokasi = ?`;
+    await conn.query(deleteKartustokQuery, [id, 'PRODUKSI', ctx.idtenant, ctx.idlokasi]);
 
     // 6. Hapus detail lama
     const deleteDetailQuery = 'DELETE FROM produksidtl WHERE idproduksi = ? AND idtenant = ?';
@@ -379,7 +379,7 @@ exports.update = async (req, res) => {
       (idproduksi, idtenant, idbarang, jenisbarang, jml, satuan, harga_satuan, subtotal)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
     const insertKartustokQuery = `INSERT INTO kartustok
-      (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref)
+      (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
     for (const item of items) {
@@ -403,7 +403,7 @@ exports.update = async (req, res) => {
 
       await conn.query(insertKartustokQuery, [
         ctx.idtenant, ctx.idlokasi, produksi.kodeproduksi, item.idbarang, jmlKecil,
-        jenisStok, today, `Produksi ${produksi.kodeproduksi}`, id, 'produksi'
+        jenisStok, today, `Produksi ${produksi.kodeproduksi}`, id, 'PRODUKSI'
       ]);
     }
 
@@ -467,7 +467,7 @@ exports.cancel = async (req, res) => {
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const insertKartustokQuery = `INSERT INTO kartustok
-      (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref)
+      (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
     for (const dtl of details) {
