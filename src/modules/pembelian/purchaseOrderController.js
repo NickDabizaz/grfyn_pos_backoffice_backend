@@ -2,18 +2,22 @@ const { tenantQuery, getConnection, getTenantContext } = require('../../config/d
 const { generateKodePO } = require('../../lib/kodetrans');
 const logger = require('../../lib/logger');
 
+function shouldApprove(req) {
+  return req.body.approve === true || req.body.status === 'APPROVED';
+}
+
 // GET /purchase-order — Daftar PO dengan filter
 exports.getAll = async (req, res) => {
   try {
     const ctx = getTenantContext();
     const { tglwal, tglakhir, status, idsupplier, idlokasi, available, search } = req.query;
-    let sql = `SELECT po.*, s.namasupplier FROM purchaseorder po
+    let sql = `SELECT po.*, DATE_FORMAT(po.tgltrans, '%Y-%m-%d') AS tgltrans, s.namasupplier FROM purchaseorder po
       LEFT JOIN supplier s ON po.idsupplier = s.idsupplier AND s.idtenant = po.idtenant
       WHERE po.idtenant = ?`;
     const params = [ctx.idtenant];
     if (available === '1' || available == 1) {
-      sql += ` AND NOT EXISTS (
-        SELECT 1 FROM grn g WHERE g.idpo = po.idpo AND g.status != 'VOID' AND g.idtenant = po.idtenant
+      sql += ` AND po.status = 'APPROVED' AND NOT EXISTS (
+        SELECT 1 FROM bpb WHERE bpb.idpo = po.idpo AND bpb.status != 'CANCELLED' AND bpb.idtenant = po.idtenant
       )`;
     }
     if (idlokasi) { sql += ' AND po.idlokasi = ?'; params.push(idlokasi); }
@@ -36,7 +40,8 @@ exports.getOne = async (req, res) => {
   try {
     const ctx = getTenantContext();
     const rows = await tenantQuery(
-      `SELECT po.*, s.namasupplier, s.kodesupplier, s.alamat AS salamat, s.hp AS shp,
+      `SELECT po.*, DATE_FORMAT(po.tgltrans, '%Y-%m-%d') AS tgltrans,
+              s.namasupplier, s.kodesupplier, s.alamat AS salamat, s.hp AS shp,
               l.namalokasi, l.kodelokasi
        FROM purchaseorder po
        LEFT JOIN supplier s ON po.idsupplier = s.idsupplier AND s.idtenant = po.idtenant
@@ -73,14 +78,15 @@ exports.create = async (req, res) => {
 
     const kodepo = await generateKodePO(conn, ctx.idtenant, idlokasi);
     const tgl = tgltrans || new Date().toISOString().slice(0, 10);
+    const status = shouldApprove(req) ? 'APPROVED' : 'DRAFT';
 
     await conn.beginTransaction();
 
     let grandtotal = 0;
     const [headerResult] = await conn.query(
       `INSERT INTO purchaseorder (idtenant, idlokasi, kodepo, tgltrans, idsupplier, iduser, grandtotal, catatan, status, userentry, tglentry)
-       VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'DRAFT', ?, NOW())`,
-      [ctx.idtenant, idlokasi, kodepo, tgl, idsupplier, ctx.iduser, catatan || null, ctx.iduser]
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NOW())`,
+      [ctx.idtenant, idlokasi, kodepo, tgl, idsupplier, ctx.iduser, catatan || null, status, ctx.iduser]
     );
     const idpo = headerResult.insertId;
 
@@ -98,7 +104,7 @@ exports.create = async (req, res) => {
 
     await conn.commit();
     await logger.history('PO_CREATE', { idtenant: ctx.idtenant, idlokasi, iduser: ctx.iduser, ref: kodepo, req });
-    res.status(201).json({ message: 'Purchase order berhasil dibuat', kodepo, idpo, grandtotal });
+    res.status(201).json({ message: 'Purchase order berhasil dibuat', kodepo, idpo, grandtotal, status });
   } catch (err) {
     await conn.rollback();
     logger.error(err, { req });
@@ -126,15 +132,24 @@ exports.update = async (req, res) => {
       'SELECT * FROM purchaseorder WHERE idpo = ? AND idtenant = ?',
       [id, ctx.idtenant]
     );
-    if (!po) return res.status(404).json({ message: 'Purchase order tidak ditemukan' });
-    if (po.status !== 'DRAFT') return res.status(400).json({ message: 'Hanya PO DRAFT yang bisa diedit' });
+    if (!po) {
+      const err = new Error('Purchase order tidak ditemukan');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (po.status !== 'DRAFT') {
+      const err = new Error('Hanya PO DRAFT yang bisa diedit');
+      err.statusCode = 400;
+      throw err;
+    }
 
     const tgl = tgltrans || String(po.tgltrans).slice(0, 10);
+    const status = shouldApprove(req) ? 'APPROVED' : 'DRAFT';
 
     await conn.query('DELETE FROM purchaseorderdtl WHERE idpo = ? AND idtenant = ?', [id, ctx.idtenant]);
     await conn.query(
-      'UPDATE purchaseorder SET idlokasi = ?, idsupplier = ?, tgltrans = ?, catatan = ? WHERE idpo = ? AND idtenant = ?',
-      [idlokasi, idsupplier, tgl, catatan || null, id, ctx.idtenant]
+      'UPDATE purchaseorder SET idlokasi = ?, idsupplier = ?, tgltrans = ?, catatan = ?, status = ? WHERE idpo = ? AND idtenant = ?',
+      [idlokasi, idsupplier, tgl, catatan || null, status, id, ctx.idtenant]
     );
 
     let grandtotal = 0;
@@ -152,11 +167,11 @@ exports.update = async (req, res) => {
 
     await conn.commit();
     await logger.history('PO_UPDATE', { idtenant: ctx.idtenant, idlokasi, iduser: ctx.iduser, ref: po.kodepo, req });
-    res.json({ message: 'Purchase order berhasil diupdate', grandtotal });
+    res.json({ message: 'Purchase order berhasil diupdate', grandtotal, status });
   } catch (err) {
     await conn.rollback();
     logger.error(err, { req });
-    res.status(500).json({ message: err.message });
+    res.status(err.statusCode || 500).json({ message: err.message });
   } finally {
     conn.release();
   }
@@ -173,8 +188,16 @@ exports.approve = async (req, res) => {
       'SELECT * FROM purchaseorder WHERE idpo = ? AND idtenant = ?',
       [req.params.id, ctx.idtenant]
     );
-    if (!po) return res.status(404).json({ message: 'Purchase order tidak ditemukan' });
-    if (po.status !== 'DRAFT') return res.status(400).json({ message: 'Hanya DRAFT yang bisa di-approve' });
+    if (!po) {
+      const err = new Error('Purchase order tidak ditemukan');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (po.status !== 'DRAFT') {
+      const err = new Error('Hanya DRAFT yang bisa di-approve');
+      err.statusCode = 400;
+      throw err;
+    }
 
     await conn.query(
       "UPDATE purchaseorder SET status = 'APPROVED' WHERE idpo = ? AND idtenant = ?",
@@ -187,7 +210,56 @@ exports.approve = async (req, res) => {
   } catch (err) {
     await conn.rollback();
     logger.error(err, { req });
-    res.status(500).json({ message: err.message });
+    res.status(err.statusCode || 500).json({ message: err.message });
+  } finally {
+    conn.release();
+  }
+};
+
+// PUT /purchase-order/:id/unapprove - Batalkan approve PO jika belum lanjut ke BPB
+exports.unapprove = async (req, res) => {
+  const conn = await getConnection();
+  try {
+    const ctx = getTenantContext();
+    await conn.beginTransaction();
+
+    const [[po]] = await conn.query(
+      'SELECT * FROM purchaseorder WHERE idpo = ? AND idtenant = ?',
+      [req.params.id, ctx.idtenant]
+    );
+    if (!po) {
+      const err = new Error('Purchase order tidak ditemukan');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (po.status !== 'APPROVED') {
+      const err = new Error('Hanya PO APPROVED yang bisa batal approve');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const [[bpb]] = await conn.query(
+      "SELECT idbpb FROM bpb WHERE idpo = ? AND idtenant = ? AND status != 'CANCELLED' LIMIT 1",
+      [req.params.id, ctx.idtenant]
+    );
+    if (bpb) {
+      const err = new Error('PO sudah dibuatkan BPB, tidak bisa batal approve');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    await conn.query(
+      "UPDATE purchaseorder SET status = 'DRAFT' WHERE idpo = ? AND idtenant = ?",
+      [req.params.id, ctx.idtenant]
+    );
+
+    await conn.commit();
+    await logger.history('PO_UNAPPROVE', { idtenant: ctx.idtenant, idlokasi: po.idlokasi, iduser: ctx.iduser, ref: po.kodepo, req });
+    res.json({ message: 'Approve Purchase Order berhasil dibatalkan' });
+  } catch (err) {
+    await conn.rollback();
+    logger.error(err, { req });
+    res.status(err.statusCode || 500).json({ message: err.message });
   } finally {
     conn.release();
   }
@@ -204,8 +276,16 @@ exports.batal = async (req, res) => {
       'SELECT * FROM purchaseorder WHERE idpo = ? AND idtenant = ?',
       [req.params.id, ctx.idtenant]
     );
-    if (!po) return res.status(404).json({ message: 'Purchase order tidak ditemukan' });
-    if (po.status !== 'DRAFT') return res.status(400).json({ message: 'Hanya DRAFT yang bisa dibatalkan' });
+    if (!po) {
+      const err = new Error('Purchase order tidak ditemukan');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (po.status !== 'DRAFT') {
+      const err = new Error('Hanya DRAFT yang bisa dibatalkan');
+      err.statusCode = 400;
+      throw err;
+    }
 
     await conn.query(
       "UPDATE purchaseorder SET status = 'CANCELLED' WHERE idpo = ? AND idtenant = ?",
@@ -218,7 +298,7 @@ exports.batal = async (req, res) => {
   } catch (err) {
     await conn.rollback();
     logger.error(err, { req });
-    res.status(500).json({ message: err.message });
+    res.status(err.statusCode || 500).json({ message: err.message });
   } finally {
     conn.release();
   }

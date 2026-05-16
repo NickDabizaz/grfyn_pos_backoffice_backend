@@ -30,6 +30,10 @@ const beliSchema = z.object({
   tgltrans   : z.string().optional(),
   useppn     : z.boolean().optional(),
   langsung_lunas: z.boolean().optional(),
+  approve    : z.boolean().optional(),
+  idbpb      : z.number().int().positive().optional().nullable(),
+  kodebpb    : z.string().optional().nullable(),
+  jalurpembelian: z.enum(['PESANAN', 'LANGSUNG']).optional(),
   items      : z.array(z.object({
     idbarang : z.number().int().positive('idbarang harus bilangan bulat positif'),
     jml      : z.number().int().positive('jml harus bilangan bulat > 0'),

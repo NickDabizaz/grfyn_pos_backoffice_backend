@@ -13,6 +13,39 @@ function toKecilJml(jml, satuan, barang) {
   return jml; // Jika tidak cocok atau sudah satuan kecil
 }
 
+async function assertBpbCanBeUsed(conn, { idbpb, idtenant, currentIdbeli = null }) {
+  if (!idbpb) return;
+
+  const [[bpb]] = await conn.query(
+    'SELECT idbpb, kodebpb, status FROM bpb WHERE idbpb = ? AND idtenant = ?',
+    [idbpb, idtenant]
+  );
+  if (!bpb) {
+    const err = new Error('BPB tidak ditemukan');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const isCurrentConfirmed = currentIdbeli && bpb.status === 'CONFIRMED';
+  if (bpb.status !== 'APPROVED' && !isCurrentConfirmed) {
+    const err = new Error('Pembelian hanya bisa dibuat dari BPB APPROVED');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const [[used]] = await conn.query(
+    `SELECT idbeli FROM beli
+     WHERE idbpb = ? AND idtenant = ? AND status != 'CANCELLED' AND (? IS NULL OR idbeli <> ?)
+     LIMIT 1`,
+    [idbpb, idtenant, currentIdbeli, currentIdbeli]
+  );
+  if (used) {
+    const err = new Error('BPB sudah digunakan di Pembelian lain');
+    err.statusCode = 400;
+    throw err;
+  }
+}
+
 // POST /beli — Buat transaksi pembelian baru
 exports.create = async (req, res) => {
   const conn = await getConnection();
@@ -36,9 +69,12 @@ exports.create = async (req, res) => {
     const idlokasi   = (customIdlokasi && parseInt(customIdlokasi)) ? parseInt(customIdlokasi) : null;
     const tgltrans   = req.body.tgltrans   || new Date().toISOString().slice(0, 10);
     const kodebeli   = (customKodebeli && customKodebeli.trim()) ? customKodebeli.trim() : await generateKodeBeli(conn, ctx.idtenant, idlokasi);
-    const jenistransaksi = langsungLunas ? 'BELI LUNAS' : 'BELI';
-    const idgrn      = req.body.idgrn   || null;
-    const kodegrn    = req.body.kodegrn || null;
+    const approve = req.body.approve === true || req.body.status === 'APPROVED';
+    const idbpb      = req.body.idbpb   || null;
+    const kodebpb    = req.body.kodebpb || null;
+    const jalurpembelian = idbpb ? 'PESANAN' : (req.body.jalurpembelian || 'LANGSUNG');
+    const jenistransaksi = `${jalurpembelian === 'PESANAN' ? 'PEMBELIAN PESANAN' : 'PEMBELIAN LANGSUNG'}${langsungLunas ? ' LUNAS' : ''}`;
+    const statusBeli = approve ? 'APPROVED' : 'DRAFT';
 
     if (!idlokasi) {
       await conn.rollback();
@@ -48,6 +84,7 @@ exports.create = async (req, res) => {
       await conn.rollback();
       return res.status(400).json({ message: 'Supplier wajib dipilih' });
     }
+    await assertBpbCanBeUsed(conn, { idbpb, idtenant: ctx.idtenant });
 
     // Ambil PPN Tenant (Default 11%)
     const [[tenant]]   = await conn.query('SELECT ppn FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
@@ -56,11 +93,11 @@ exports.create = async (req, res) => {
 
     // 2. Insert Header Pembelian (Beli)
     const queryInsertHeader = `
-      INSERT INTO beli (idtenant, idlokasi, kodebeli, tgltrans, idsupplier, iduser, grandtotal, bayar, jenistransaksi, idgrn, kodegrn, status, userentry)
-      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'AKTIF', ?)
+      INSERT INTO beli (idtenant, idlokasi, kodebeli, tgltrans, idsupplier, iduser, grandtotal, bayar, jenistransaksi, idbpb, kodebpb, jalurpembelian, is_lunaslangsung, status, userentry)
+      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     await conn.query(queryInsertHeader, [
-      ctx.idtenant, idlokasi, kodebeli, tgltrans, idsupplier, ctx.iduser, 0, jenistransaksi, idgrn, kodegrn, ctx.iduser
+      ctx.idtenant, idlokasi, kodebeli, tgltrans, idsupplier, ctx.iduser, 0, jenistransaksi, idbpb, kodebpb, jalurpembelian, langsungLunas ? 1 : 0, statusBeli, ctx.iduser
     ]);
 
     // Ambil ID Header yang baru dibuat
@@ -90,27 +127,29 @@ exports.create = async (req, res) => {
         idbeli, ctx.idtenant, item.idbarang, jml, harga, ppnRp, diskon, subTtl, item.satuan || null
       ]);
 
-      // Ambil Info Barang untuk Konversi Stok & Insert Kartu Stok
-      const [[barangInfo]] = await conn.query('SELECT satuanbesar, satuansedang, satuankecil, konversi1, konversi2 FROM barang WHERE idbarang = ? AND idtenant = ?', [item.idbarang, ctx.idtenant]);
-      const jmlStokKecil   = barangInfo ? toKecilJml(jml, item.satuan, barangInfo) : jml;
+      if (approve) {
+        // Ambil Info Barang untuk Konversi Stok & Insert Kartu Stok
+        const [[barangInfo]] = await conn.query('SELECT satuanbesar, satuansedang, satuankecil, konversi1, konversi2 FROM barang WHERE idbarang = ? AND idtenant = ?', [item.idbarang, ctx.idtenant]);
+        const jmlStokKecil   = barangInfo ? toKecilJml(jml, item.satuan, barangInfo) : jml;
 
-      const queryInsertStok = `
-        INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) 
-        VALUES (?, ?, ?, ?, ?, 'M', ?, ?, ?, 'beli')
-      `;
-      await conn.query(queryInsertStok, [
-        ctx.idtenant, idlokasi, kodebeli, item.idbarang, jmlStokKecil, tgltrans, `Pembelian ${kodebeli}`, idbeli
-      ]);
+        const queryInsertStok = `
+          INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) 
+          VALUES (?, ?, ?, ?, ?, 'M', ?, ?, ?, 'beli')
+        `;
+        await conn.query(queryInsertStok, [
+          ctx.idtenant, idlokasi, kodebeli, item.idbarang, jmlStokKecil, tgltrans, `Pembelian ${kodebeli}`, idbeli
+        ]);
 
-      // Update History Harga Beli (Jika Berubah)
-      const [[latestHarga]] = await conn.query('SELECT hargabeli FROM hargabeli WHERE idbarang = ? AND idtenant = ? ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1', [item.idbarang, ctx.idtenant]);
-      if (!latestHarga || parseFloat(latestHarga.hargabeli) !== harga) {
-        await conn.query('INSERT INTO hargabeli (idtenant, idbarang, hargabeli, tgltrans) VALUES (?, ?, ?, ?)', [ctx.idtenant, item.idbarang, harga, tgltrans]);
+        // Update History Harga Beli (Jika Berubah)
+        const [[latestHarga]] = await conn.query("SELECT hargabeli FROM hargabeli WHERE idbarang = ? AND idtenant = ? AND status = 'AKTIF' ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1", [item.idbarang, ctx.idtenant]);
+        if (!latestHarga || parseFloat(latestHarga.hargabeli) !== harga) {
+          await conn.query('INSERT INTO hargabeli (idtenant, idbarang, hargabeli, tgltrans, idref, koderef, jenisref, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [ctx.idtenant, item.idbarang, harga, tgltrans, idbeli, kodebeli, 'beli', 'AKTIF']);
+        }
       }
     }
 
     // 4. Update Grandtotal di Header
-    const bayarFinal = langsungLunas ? grandTotal : 0;
+    const bayarFinal = approve && langsungLunas ? grandTotal : 0;
     await conn.query('UPDATE beli SET grandtotal = ?, bayar = ? WHERE idbeli = ?', [grandTotal, bayarFinal, idbeli]);
 
     // 5. Catat Kartu Hutang
@@ -118,20 +157,22 @@ exports.create = async (req, res) => {
       INSERT INTO kartuhutang (idtenant, idlokasi, idsupplier, kodetrans, jenis, amount, terbayar, sisa, tgltrans, status) 
       VALUES (?, ?, ?, ?, 'BELI', ?, ?, ?, ?, ?)
     `;
-    await conn.query(queryInsertHutang, [
-      ctx.idtenant,
-      idlokasi,
-      idsupplier,
-      kodebeli,
-      grandTotal,
-      langsungLunas ? grandTotal : 0,
-      langsungLunas ? 0 : grandTotal,
-      tgltrans,
-      langsungLunas ? 'LUNAS' : 'OPEN',
-    ]);
+    if (approve) {
+      await conn.query(queryInsertHutang, [
+        ctx.idtenant,
+        idlokasi,
+        idsupplier,
+        kodebeli,
+        grandTotal,
+        langsungLunas ? grandTotal : 0,
+        langsungLunas ? 0 : grandTotal,
+        tgltrans,
+        langsungLunas ? 'LUNAS' : 'OPEN',
+      ]);
+    }
 
     // 6. Opsi Pelunasan Langsung (Jika Dicentang)
-    if (langsungLunas && grandTotal > 0 && idsupplier) {
+    if (approve && langsungLunas && grandTotal > 0 && idsupplier) {
       const kodepelunasan = await generateKodePelunasanHutang(conn, ctx.idtenant, idlokasi);
       const metodbayar    = req.body.metodbayar || 'TUNAI';
       const catatan       = `Pelunasan Langsung Beli ${kodebeli}`;
@@ -150,8 +191,12 @@ exports.create = async (req, res) => {
 
     }
 
+    if (idbpb) {
+      await conn.query("UPDATE bpb SET status = 'CONFIRMED' WHERE idbpb = ? AND idtenant = ?", [idbpb, ctx.idtenant]);
+    }
     await conn.commit();
-    await logger.history('BELI_CREATE', { idtenant: ctx.idtenant, idlokasi, iduser: ctx.iduser, ref: kodebeli, detail: { grandtotal: grandTotal }, req });
+
+    await logger.history('BELI_CREATE', { idtenant: ctx.idtenant, idlokasi, iduser: ctx.iduser, ref: kodebeli, detail: { grandtotal: grandTotal, status: statusBeli }, req });
     
     res.status(201).json({ message: 'Pembelian berhasil', kodebeli, idbeli, grandtotal: grandTotal });
   } catch (err) {
@@ -191,8 +236,8 @@ exports.getAll = async (req, res) => {
 
     // Filter Dinamis
     if (available === '1' || available == 1) {
-      sql += ` AND NOT EXISTS (
-        SELECT 1 FROM returbeli rb WHERE rb.idbeli = b.idbeli AND rb.status != 'VOID' AND rb.idtenant = b.idtenant
+      sql += ` AND b.status = 'APPROVED' AND NOT EXISTS (
+        SELECT 1 FROM returbeli rb WHERE rb.idbeli = b.idbeli AND rb.status != 'CANCELLED' AND rb.idtenant = b.idtenant
       )`;
     }
     if (idlokasi)   { sql += ' AND b.idlokasi = ?';   params.push(idlokasi); }
@@ -272,8 +317,10 @@ exports.update = async (req, res) => {
     const newIdsupplier  = req.body.idsupplier || null;
     const newTgltrans    = req.body.tgltrans;
     const langsungLunas  = req.body.langsung_lunas === true;
-    const newIdgrn       = req.body.idgrn   || null;
-    const newKodegrn     = req.body.kodegrn || null;
+    const approve        = req.body.approve === true || req.body.status === 'APPROVED';
+    const newIdbpb       = req.body.idbpb   || null;
+    const newKodebpb     = req.body.kodebpb || null;
+    const jalurpembelian = newIdbpb ? 'PESANAN' : (req.body.jalurpembelian || 'LANGSUNG');
 
     if (!items || !items.length) {
       await conn.rollback();
@@ -286,15 +333,20 @@ exports.update = async (req, res) => {
       await conn.rollback();
       return res.status(404).json({ message: 'Pembelian tidak ditemukan' });
     }
-    if (beli.status === 'VOID') {
+    if (beli.status === 'CANCELLED') {
       await conn.rollback();
       return res.status(400).json({ message: 'Pembelian sudah dibatalkan' });
+    }
+    if (beli.status !== 'DRAFT') {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Hanya Pembelian DRAFT yang bisa diedit' });
     }
 
     const kodebeli = beli.kodebeli;
     const idlokasi = (newIdlokasi && parseInt(newIdlokasi)) ? parseInt(newIdlokasi) : null;
     const tgltrans = newTgltrans || String(beli.tgltrans).slice(0, 10);
-    const jenistransaksi = langsungLunas ? 'BELI LUNAS' : 'BELI';
+    const jenistransaksi = `${jalurpembelian === 'PESANAN' ? 'PEMBELIAN PESANAN' : 'PEMBELIAN LANGSUNG'}${langsungLunas ? ' LUNAS' : ''}`;
+    const statusBeli = approve ? 'APPROVED' : 'DRAFT';
 
     if (!idlokasi) {
       await conn.rollback();
@@ -304,6 +356,7 @@ exports.update = async (req, res) => {
       await conn.rollback();
       return res.status(400).json({ message: 'Supplier wajib dipilih' });
     }
+    await assertBpbCanBeUsed(conn, { idbpb: newIdbpb, idtenant: ctx.idtenant, currentIdbeli: id });
 
     // 2. CLEAN UP - Hapus Pelunasan, Hutang, Stok, dan Detail Lama
     // Hapus header dan detail pelunasan sekaligus agar tidak dobel/menumpuk
@@ -322,8 +375,8 @@ exports.update = async (req, res) => {
 
     // 3. Update Header Beli (TERMASUK UPDATE LOKASI & SUPPLIER)
     await conn.query(
-      'UPDATE beli SET tgltrans = ?, idlokasi = ?, idsupplier = ?, jenistransaksi = ?, idgrn = ?, kodegrn = ? WHERE idbeli = ? AND idtenant = ?',
-      [tgltrans, idlokasi, newIdsupplier, jenistransaksi, newIdgrn, newKodegrn, id, ctx.idtenant]
+      'UPDATE beli SET tgltrans = ?, idlokasi = ?, idsupplier = ?, jenistransaksi = ?, idbpb = ?, kodebpb = ?, jalurpembelian = ?, is_lunaslangsung = ?, status = ? WHERE idbeli = ? AND idtenant = ?',
+      [tgltrans, idlokasi, newIdsupplier, jenistransaksi, newIdbpb, newKodebpb, jalurpembelian, langsungLunas ? 1 : 0, statusBeli, id, ctx.idtenant]
     );
 
     // 4. Proses Rekonstruksi Detail Items & Stok
@@ -349,45 +402,49 @@ exports.update = async (req, res) => {
         [id, ctx.idtenant, item.idbarang, jml, harga, ppnRp, diskon, subTtl, item.satuan || null]
       );
 
-      // Konversi Stok & Insert Kartu Stok Baru (menggunakan idlokasi baru jika berubah)
-      const [[barangInfo]] = await conn.query('SELECT satuanbesar, satuansedang, satuankecil, konversi1, konversi2 FROM barang WHERE idbarang = ? AND idtenant = ?', [item.idbarang, ctx.idtenant]);
-      const jmlStokKecil   = barangInfo ? toKecilJml(jml, item.satuan, barangInfo) : jml;
+      if (approve) {
+        // Konversi Stok & Insert Kartu Stok Baru (menggunakan idlokasi baru jika berubah)
+        const [[barangInfo]] = await conn.query('SELECT satuanbesar, satuansedang, satuankecil, konversi1, konversi2 FROM barang WHERE idbarang = ? AND idtenant = ?', [item.idbarang, ctx.idtenant]);
+        const jmlStokKecil   = barangInfo ? toKecilJml(jml, item.satuan, barangInfo) : jml;
 
-      await conn.query(
-        'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [ctx.idtenant, idlokasi, kodebeli, item.idbarang, jmlStokKecil, 'M', tgltrans, `Pembelian ${kodebeli}`, id, 'beli']
-      );
+        await conn.query(
+          'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [ctx.idtenant, idlokasi, kodebeli, item.idbarang, jmlStokKecil, 'M', tgltrans, `Pembelian ${kodebeli}`, id, 'beli']
+        );
 
-      // Update History Harga
-      const [[latestHarga]] = await conn.query('SELECT hargabeli FROM hargabeli WHERE idbarang = ? AND idtenant = ? ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1', [item.idbarang, ctx.idtenant]);
-      if (!latestHarga || parseFloat(latestHarga.hargabeli) !== harga) {
-        await conn.query('INSERT INTO hargabeli (idtenant, idbarang, hargabeli, tgltrans) VALUES (?, ?, ?, ?)', [ctx.idtenant, item.idbarang, harga, tgltrans]);
+        // Update History Harga
+        const [[latestHarga]] = await conn.query("SELECT hargabeli FROM hargabeli WHERE idbarang = ? AND idtenant = ? AND status = 'AKTIF' ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1", [item.idbarang, ctx.idtenant]);
+        if (!latestHarga || parseFloat(latestHarga.hargabeli) !== harga) {
+          await conn.query('INSERT INTO hargabeli (idtenant, idbarang, hargabeli, tgltrans, idref, koderef, jenisref, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [ctx.idtenant, item.idbarang, harga, tgltrans, id, kodebeli, 'beli', 'AKTIF']);
+        }
       }
     }
 
     // 5. Update Ulang Grandtotal di Header
-    const bayarFinal = langsungLunas ? grandTotal : 0;
+    const bayarFinal = approve && langsungLunas ? grandTotal : 0;
     await conn.query('UPDATE beli SET grandtotal = ?, bayar = ? WHERE idbeli = ? AND idtenant = ?', [grandTotal, bayarFinal, id, ctx.idtenant]);
 
     // 6. Buat Ulang Kartu Hutang dengan supplier dan lokasi terbaru
-    await conn.query(
-      'INSERT INTO kartuhutang (idtenant, idlokasi, idsupplier, kodetrans, jenis, amount, terbayar, sisa, tgltrans, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [
-        ctx.idtenant,
-        idlokasi,
-        newIdsupplier,
-        kodebeli,
-        'BELI',
-        grandTotal,
-        langsungLunas ? grandTotal : 0,
-        langsungLunas ? 0 : grandTotal,
-        tgltrans,
-        langsungLunas ? 'LUNAS' : 'OPEN',
-      ]
-    );
+    if (approve) {
+      await conn.query(
+        'INSERT INTO kartuhutang (idtenant, idlokasi, idsupplier, kodetrans, jenis, amount, terbayar, sisa, tgltrans, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          ctx.idtenant,
+          idlokasi,
+          newIdsupplier,
+          kodebeli,
+          'BELI',
+          grandTotal,
+          langsungLunas ? grandTotal : 0,
+          langsungLunas ? 0 : grandTotal,
+          tgltrans,
+          langsungLunas ? 'LUNAS' : 'OPEN',
+        ]
+      );
+    }
 
     // 7. Jika Checkbox Lunas Dicentang, Buat Pelunasan
-    if (langsungLunas && grandTotal > 0 && newIdsupplier) {
+    if (approve && langsungLunas && grandTotal > 0 && newIdsupplier) {
       const kodepelunasan = await generateKodePelunasanHutang(conn, ctx.idtenant, idlokasi);
       const metodbayar    = req.body.metodbayar || 'TUNAI';
 
@@ -403,8 +460,12 @@ exports.update = async (req, res) => {
 
     }
 
+    if (newIdbpb) {
+      await conn.query("UPDATE bpb SET status = 'CONFIRMED' WHERE idbpb = ? AND idtenant = ?", [newIdbpb, ctx.idtenant]);
+    }
     await conn.commit();
-    await logger.history('BELI_UPDATE', { idtenant: ctx.idtenant, idlokasi, iduser: ctx.iduser, ref: kodebeli, req });
+
+    await logger.history('BELI_UPDATE', { idtenant: ctx.idtenant, idlokasi, iduser: ctx.iduser, ref: kodebeli, detail: { status: statusBeli }, req });
     
     res.json({ message: 'Pembelian berhasil diupdate', grandtotal: grandTotal });
   } catch (err) {
@@ -461,9 +522,15 @@ exports.cancel = async (req, res) => {
       await conn.rollback();
       return res.status(404).json({ message: 'Pembelian tidak ditemukan' });
     }
-    if (beli.status === 'VOID') {
+    if (beli.status === 'CANCELLED') {
       await conn.rollback();
       return res.status(400).json({ message: 'Pembelian sudah dibatalkan' });
+    }
+    if (beli.status === 'DRAFT') {
+      await conn.query("UPDATE beli SET status = 'CANCELLED' WHERE idbeli = ? AND idtenant = ?", [id, ctx.idtenant]);
+      await conn.commit();
+      await logger.history('BELI_CANCEL', { idtenant: ctx.idtenant, idlokasi: beli.idlokasi, iduser: ctx.iduser, ref: beli.kodebeli, req });
+      return res.json({ message: 'Pembelian berhasil dibatalkan' });
     }
 
     // Validasi: Tolak void jika hutang sudah LUNAS
@@ -483,8 +550,8 @@ exports.cancel = async (req, res) => {
       );
     }
 
-    // 1. Ubah status jadi VOID
-    await conn.query("UPDATE beli SET status = 'VOID' WHERE idbeli = ? AND idtenant = ?", [id, ctx.idtenant]);
+    // 1. Ubah status jadi CANCELLED
+    await conn.query("UPDATE beli SET status = 'CANCELLED' WHERE idbeli = ? AND idtenant = ?", [id, ctx.idtenant]);
 
     // 2. Hapus tagihan (Kartu Hutang)
     await conn.query('DELETE FROM kartuhutang WHERE kodetrans = ? AND idtenant = ?', [beli.kodebeli, ctx.idtenant]);
@@ -496,9 +563,14 @@ exports.cancel = async (req, res) => {
     for (const dtl of details) {
       await conn.query(
         'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [ctx.idtenant, beli.idlokasi, `VOID-${beli.kodebeli}`, dtl.idbarang, dtl.jml, 'K', today, `Pembatalan ${beli.kodebeli}`, beli.idbeli, 'beli_void']
+        [ctx.idtenant, beli.idlokasi, `CANCEL-${beli.kodebeli}`, dtl.idbarang, dtl.jml, 'K', today, `Pembatalan ${beli.kodebeli}`, beli.idbeli, 'beli_cancel']
       );
     }
+
+    await conn.query(
+      "UPDATE hargabeli SET status = 'CANCELLED' WHERE idref = ? AND koderef = ? AND jenisref = 'beli' AND idtenant = ?",
+      [beli.idbeli, beli.kodebeli, ctx.idtenant]
+    );
 
     await conn.commit();
     await logger.history('BELI_CANCEL', { idtenant: ctx.idtenant, idlokasi: beli.idlokasi, iduser: ctx.iduser, ref: beli.kodebeli, req });

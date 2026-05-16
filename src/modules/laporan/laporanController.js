@@ -480,7 +480,7 @@ exports.pembelian = async (req, res) => {
 
     let sql = `SELECT b.*, s.namasupplier FROM beli b
       LEFT JOIN supplier s ON b.idsupplier = s.idsupplier AND s.idtenant = b.idtenant
-      WHERE 1=1 and b.status <> 'VOID'`;
+      WHERE 1=1 and b.status = 'APPROVED'`;
     const params = [];
     sql += ' AND b.idlokasi = ?'; params.push(ctx.idlokasi);
     if (tglwal) { sql += ' AND b.tgltrans >= ?'; params.push(tglwal); }
@@ -507,7 +507,7 @@ exports.pembelian = async (req, res) => {
           LEFT JOIN lokasi l ON b.idlokasi = l.idlokasi AND l.idtenant = b.idtenant
           LEFT JOIN belidtl bd ON b.idbeli = bd.idbeli AND bd.idtenant = b.idtenant
           LEFT JOIN barang bg ON bd.idbarang = bg.idbarang AND bg.idtenant = b.idtenant
-        WHERE b.status <> 'VOID' AND b.idlokasi = ?`;
+        WHERE b.status = 'APPROVED' AND b.idlokasi = ?`;
       const detailParams = [ctx.idlokasi];
       if (tglwal) { sqlDetail += ' AND b.tgltrans >= ?'; detailParams.push(tglwal); }
       if (tglakhir) { sqlDetail += ' AND b.tgltrans <= ?'; detailParams.push(tglakhir); }
@@ -744,7 +744,7 @@ exports.pembelianPerSupplier = async (req, res) => {
         COUNT(b.idbeli) as total_transaksi,
         COALESCE(SUM(b.grandtotal), 0) as total_pembelian
       FROM supplier s
-      LEFT JOIN beli b ON s.idsupplier = b.idsupplier AND b.idtenant = s.idtenant AND b.idlokasi = ?`;
+      LEFT JOIN beli b ON s.idsupplier = b.idsupplier AND b.idtenant = s.idtenant AND b.idlokasi = ? AND b.status = 'APPROVED'`;
     const params = [ctx.idlokasi];
     if (tglwal) { sql += ' AND b.tgltrans >= ?'; params.push(tglwal); }
     if (tglakhir) { sql += ' AND b.tgltrans <= ?'; params.push(tglakhir); }
@@ -766,7 +766,7 @@ exports.pembelianPerSupplier = async (req, res) => {
         bg.kodebarang, bg.namabarang, bg.satuankecil as satuan,
         bd.jml, bd.harga, bd.ppn, bd.subtotal, b.grandtotal, b.bayar
         FROM supplier s
-          JOIN beli b ON s.idsupplier = b.idsupplier AND b.idtenant = s.idtenant AND b.idlokasi = ? AND b.status <> 'VOID'
+          JOIN beli b ON s.idsupplier = b.idsupplier AND b.idtenant = s.idtenant AND b.idlokasi = ? AND b.status = 'APPROVED'
           JOIN belidtl bd ON b.idbeli = bd.idbeli AND bd.idtenant = b.idtenant
           JOIN barang bg ON bd.idbarang = bg.idbarang AND bg.idtenant = b.idtenant
           JOIN lokasi l ON b.idlokasi = l.idlokasi AND l.idtenant = b.idtenant
@@ -848,7 +848,7 @@ exports.pembelianPerLokasi = async (req, res) => {
         bg.kodebarang, bg.namabarang, bg.satuankecil as satuan,
         bd.jml, bd.harga, bd.ppn, bd.subtotal
         FROM lokasi l
-        JOIN beli bl ON l.idlokasi = bl.idlokasi AND bl.idtenant = l.idtenant AND bl.status != 'VOID'
+        JOIN beli bl ON l.idlokasi = bl.idlokasi AND bl.idtenant = l.idtenant AND bl.status = 'APPROVED'
         JOIN belidtl bd ON bl.idbeli = bd.idbeli AND bd.idtenant = bl.idtenant
         JOIN barang bg ON bd.idbarang = bg.idbarang AND bg.idtenant = bl.idtenant
         LEFT JOIN supplier s ON bl.idsupplier = s.idsupplier AND s.idtenant = bl.idtenant
@@ -911,7 +911,7 @@ exports.pembelianPerLokasi = async (req, res) => {
       COUNT(b.idbeli) as total_transaksi,
       COALESCE(SUM(b.grandtotal), 0) as total_pembelian
       FROM lokasi l
-      LEFT JOIN beli b ON l.idlokasi = b.idlokasi AND b.idtenant = l.idtenant`;
+      LEFT JOIN beli b ON l.idlokasi = b.idlokasi AND b.idtenant = l.idtenant AND b.status = 'APPROVED'`;
     const params = [];
     if (tglwal) { sql += ' AND b.tgltrans >= ?'; params.push(tglwal); }
     if (tglakhir) { sql += ' AND b.tgltrans <= ?'; params.push(tglakhir); }
@@ -941,7 +941,7 @@ exports.pembelianPerBarang = async (req, res) => {
         bd.jml, bd.harga, bd.subtotal
         FROM barang b
         JOIN belidtl bd ON b.idbarang = bd.idbarang AND b.idtenant = bd.idtenant
-        JOIN beli bl ON bd.idbeli = bl.idbeli AND bl.idtenant = bd.idtenant AND bl.idlokasi = ? AND bl.status != 'VOID'
+        JOIN beli bl ON bd.idbeli = bl.idbeli AND bl.idtenant = bd.idtenant AND bl.idlokasi = ? AND bl.status = 'APPROVED'
         LEFT JOIN supplier s ON bl.idsupplier = s.idsupplier AND s.idtenant = bl.idtenant`;
       const detailParams = [ctx.idlokasi];
       const detailConds = [];
@@ -974,7 +974,7 @@ exports.pembelianPerBarang = async (req, res) => {
       COALESCE(SUM(bd.subtotal), 0) as total_nilai
       FROM barang b
       LEFT JOIN belidtl bd ON b.idbarang = bd.idbarang AND b.idtenant = bd.idtenant
-      LEFT JOIN beli bl ON bd.idbeli = bl.idbeli AND bl.idtenant = bd.idtenant AND bl.idlokasi = ?`;
+      LEFT JOIN beli bl ON bd.idbeli = bl.idbeli AND bl.idtenant = bd.idtenant AND bl.idlokasi = ? AND bl.status = 'APPROVED'`;
     const params = [ctx.idlokasi];
     const conditions = [];
     if (tglwal) { conditions.push('bl.tgltrans >= ?'); params.push(tglwal); }
@@ -1002,10 +1002,10 @@ exports.pembelianRekap = async (req, res) => {
     const { tglwal, tglakhir, idsupplier } = req.query;
 
     let sql = `SELECT
-      COUNT(CASE WHEN status != 'VOID' THEN 1 END) as total_transaksi,
-      COALESCE(SUM(CASE WHEN status != 'VOID' THEN grandtotal ELSE 0 END), 0) as total_pembelian,
-      COALESCE(SUM(CASE WHEN status != 'VOID' THEN bayar ELSE 0 END), 0) as total_dibayar,
-      COALESCE(SUM(CASE WHEN status = 'AKTIF' THEN GREATEST(grandtotal - bayar, 0) ELSE 0 END), 0) as total_hutang
+      COUNT(CASE WHEN status = 'APPROVED' THEN 1 END) as total_transaksi,
+      COALESCE(SUM(CASE WHEN status = 'APPROVED' THEN grandtotal ELSE 0 END), 0) as total_pembelian,
+      COALESCE(SUM(CASE WHEN status = 'APPROVED' THEN bayar ELSE 0 END), 0) as total_dibayar,
+      COALESCE(SUM(CASE WHEN status = 'APPROVED' THEN GREATEST(grandtotal - bayar, 0) ELSE 0 END), 0) as total_hutang
       FROM beli WHERE idlokasi = ?`;
     const params = [ctx.idlokasi];
     if (tglwal) { sql += ' AND tgltrans >= ?'; params.push(tglwal); }

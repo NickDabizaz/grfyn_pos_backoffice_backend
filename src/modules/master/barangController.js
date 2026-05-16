@@ -76,7 +76,7 @@ exports.getAll = async (req, res) => {
     const ctx = getTenantContext();
     const { search, jenis } = req.query;
     let sql = `SELECT b.*,
-      (SELECT hargabeli FROM hargabeli WHERE idbarang = b.idbarang AND idtenant = ? ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1) as hargabeli_terbaru,
+      (SELECT hargabeli FROM hargabeli WHERE idbarang = b.idbarang AND idtenant = ? AND status = 'AKTIF' ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1) as hargabeli_terbaru,
       (SELECT hargajual FROM hargajual WHERE idbarang = b.idbarang AND idtenant = ? ORDER BY tgltrans DESC, idhargajual DESC LIMIT 1) as hargajual_terbaru,
       COALESCE(SUM(CASE WHEN ks.jenis='M' THEN ks.jml ELSE -ks.jml END), 0) as stok
     FROM barang b
@@ -103,7 +103,7 @@ exports.browseBarang = async (req, res) => {
     const { search, jenis, excludeJenis } = req.query;
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
     let sql = `SELECT b.*,
-      (SELECT hargabeli FROM hargabeli WHERE idbarang = b.idbarang AND idtenant = ? ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1) as hargabeli_terbaru,
+      (SELECT hargabeli FROM hargabeli WHERE idbarang = b.idbarang AND idtenant = ? AND status = 'AKTIF' ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1) as hargabeli_terbaru,
       (SELECT hargajual FROM hargajual WHERE idbarang = b.idbarang AND idtenant = ? ORDER BY tgltrans DESC, idhargajual DESC LIMIT 1) as hargajual_terbaru,
       COALESCE(SUM(CASE WHEN ks.jenis='M' THEN ks.jml ELSE -ks.jml END), 0) as stok
     FROM barang b
@@ -144,7 +144,7 @@ exports.getOne = async (req, res) => {
   try {
     const ctx = getTenantContext();
     let sql = `SELECT b.*,
-      (SELECT hargabeli FROM hargabeli WHERE idbarang = b.idbarang AND idtenant = ? ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1) as hargabeli_terbaru,
+      (SELECT hargabeli FROM hargabeli WHERE idbarang = b.idbarang AND idtenant = ? AND status = 'AKTIF' ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1) as hargabeli_terbaru,
       (SELECT hargajual FROM hargajual WHERE idbarang = b.idbarang AND idtenant = ? ORDER BY tgltrans DESC, idhargajual DESC LIMIT 1) as hargajual_terbaru,
       COALESCE(SUM(CASE WHEN ks.jenis='M' THEN ks.jml ELSE -ks.jml END), 0) as stok
     FROM barang b
@@ -272,7 +272,7 @@ exports.update = async (req, res) => {
 
     // Cek dan catat perubahan harga beli — hanya insert jika harga berubah
     if (hargabeli) {
-      let sql3 = 'SELECT hargabeli FROM hargabeli WHERE idbarang = ? AND idtenant = ? ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1';
+      let sql3 = "SELECT hargabeli FROM hargabeli WHERE idbarang = ? AND idtenant = ? AND status = 'AKTIF' ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1";
       const [[latest]] = await conn.query(sql3, [id, ctx.idtenant]);
       if (!latest || parseFloat(latest.hargabeli) !== parseFloat(hargabeli)) {
         let sql4 = 'INSERT INTO hargabeli (idtenant, idbarang, hargabeli, tgltrans) VALUES (?, ?, ?, ?)';
@@ -346,7 +346,7 @@ exports.getHargaJual = async (req, res) => {
 exports.checkPrice = async (req, res) => {
   try {
     let sql = `SELECT b.*,
-      (SELECT hargabeli FROM hargabeli WHERE idbarang = b.idbarang AND idtenant = b.idtenant ORDER BY tgltrans DESC, hargabeli desc LIMIT 1) as hargabeli,
+      (SELECT hargabeli FROM hargabeli WHERE idbarang = b.idbarang AND idtenant = b.idtenant AND status = 'AKTIF' ORDER BY tgltrans DESC, hargabeli desc LIMIT 1) as hargabeli,
       (SELECT hargajual FROM hargajual WHERE idbarang = b.idbarang AND idtenant = b.idtenant ORDER BY tgltrans DESC, hargajual desc LIMIT 1) as hargajual
     FROM barang b WHERE b.status = 'AKTIF'`;
     const rows = await tenantQuery(sql);

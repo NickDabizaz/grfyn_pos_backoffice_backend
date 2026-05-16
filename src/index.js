@@ -43,7 +43,7 @@ const laporanKeuanganRoutes = require('./modules/keuangan/routes/laporanKeuangan
 const transferstokRoutes    = require('./modules/stok/routes/transferstok');
 const shiftRoutes           = require('./modules/pos/routes/shift');
 const purchaseOrderRoutes   = require('./modules/pembelian/routes/purchaseOrder');
-const grnRoutes             = require('./modules/pembelian/routes/grn');
+const bpbRoutes             = require('./modules/pembelian/routes/bpb');
 const stockOpnameRoutes     = require('./modules/stok/routes/stockOpname');
 const karyawanRoutes        = require('./modules/hr/routes/karyawan');
 const absensiRoutes         = require('./modules/hr/routes/absensi');
@@ -101,7 +101,7 @@ app.use('/api/laporan-keuangan', laporanKeuanganRoutes);
 app.use('/api/transfer-stok', transferstokRoutes);
 app.use('/api/shift', shiftRoutes);
 app.use('/api/purchase-order', purchaseOrderRoutes);
-app.use('/api/grn', grnRoutes);
+app.use('/api/bpb', bpbRoutes);
 app.use('/api/stock-opname', stockOpnameRoutes);
 app.use('/api/karyawan', karyawanRoutes);
 app.use('/api/absensi', absensiRoutes);

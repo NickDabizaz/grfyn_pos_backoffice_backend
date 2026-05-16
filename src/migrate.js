@@ -22,7 +22,7 @@ async function migrate() {
     'payrolldtl', 'payroll',
     'absensi', 'komponengaji', 'karyawan',
     'stockopnamedtl', 'stockopname',
-    'grndtl', 'grn',
+    'bpbdtl', 'bpb',
     'purchaseorderdtl', 'purchaseorder',
     'transferstokdtl', 'transferstok',
     'shift',
@@ -47,7 +47,7 @@ async function migrate() {
     'config',
     'user', 'lokasi', 'tenant',
     'menu', 'currency',
-    'users', 'historyprogram'
+    'historyprogram'
   ];
   for (const t of tables) {
     await connection.query(`DROP TABLE IF EXISTS \`${t}\``);
@@ -74,16 +74,6 @@ async function migrate() {
       INDEX idx_history_tenant (idtenant),
       INDEX idx_history_action (action),
       INDEX idx_history_tgl (tglentry)
-    ) ENGINE=InnoDB
-  `);
-
-  // users (developer admin table)
-  await connection.query(`
-    CREATE TABLE users (
-      idusers   INT AUTO_INCREMENT PRIMARY KEY,
-      username  VARCHAR(50) NOT NULL UNIQUE,
-      pass      VARCHAR(100) NOT NULL,
-      status    VARCHAR(20) DEFAULT 'AKTIF'
     ) ENGINE=InnoDB
   `);
 
@@ -317,6 +307,10 @@ async function migrate() {
       idbarang    INT NOT NULL,
       hargabeli   DECIMAL(15,2) NOT NULL,
       tgltrans    DATE NOT NULL,
+      idref       INT DEFAULT NULL,
+      koderef     VARCHAR(30) DEFAULT NULL,
+      jenisref    VARCHAR(30) DEFAULT NULL,
+      status      VARCHAR(20) DEFAULT 'AKTIF',
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idbarang) REFERENCES barang(idbarang),
       INDEX idx_hargabeli_barang_tgl (idbarang, tgltrans)
@@ -452,9 +446,11 @@ async function migrate() {
       grandtotal  DECIMAL(15,2) DEFAULT 0,
       bayar       DECIMAL(15,2) DEFAULT 0,
       jenistransaksi VARCHAR(30) NOT NULL DEFAULT 'BELI',
-      idgrn       INT DEFAULT NULL,
-      kodegrn     VARCHAR(50) DEFAULT NULL,
-      status      VARCHAR(20) DEFAULT 'AKTIF',
+      idbpb       INT DEFAULT NULL,
+      kodebpb     VARCHAR(50) DEFAULT NULL,
+      jalurpembelian VARCHAR(20) NOT NULL DEFAULT 'LANGSUNG',
+      is_lunaslangsung TINYINT(1) NOT NULL DEFAULT 0,
+      status      VARCHAR(20) DEFAULT 'DRAFT',
       userentry   INT NOT NULL DEFAULT 0,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
@@ -1027,36 +1023,36 @@ async function migrate() {
     ) ENGINE=InnoDB
   `);
 
-  // grn
+  // bpb
   await connection.query(`
-    CREATE TABLE grn (
-      idgrn       INT AUTO_INCREMENT PRIMARY KEY,
+    CREATE TABLE bpb (
+      idbpb       INT AUTO_INCREMENT PRIMARY KEY,
       idtenant    INT NOT NULL,
       idlokasi    INT NOT NULL,
-      kodegrn     VARCHAR(30) NOT NULL,
+      kodebpb     VARCHAR(30) NOT NULL,
       tgltrans    DATE NOT NULL,
       idpo        INT DEFAULT NULL,
       idsupplier  INT DEFAULT NULL,
       iduser      INT NOT NULL,
       grandtotal  DECIMAL(15,2) DEFAULT 0,
       catatan     TEXT DEFAULT NULL,
-      status      VARCHAR(20) DEFAULT 'AKTIF',
+      status      VARCHAR(20) DEFAULT 'DRAFT',
       userentry   INT NOT NULL DEFAULT 0,
       tglentry    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
       FOREIGN KEY (idpo) REFERENCES purchaseorder(idpo),
       FOREIGN KEY (idsupplier) REFERENCES supplier(idsupplier),
-      UNIQUE KEY uq_grn_kode (idtenant, idlokasi, kodegrn),
-      INDEX idx_grn_tgl (tgltrans)
+      UNIQUE KEY uq_bpb_kode (idtenant, idlokasi, kodebpb),
+      INDEX idx_bpb_tgl (tgltrans)
     ) ENGINE=InnoDB
   `);
 
-  // grndtl
+  // bpbdtl
   await connection.query(`
-    CREATE TABLE grndtl (
-      idgrndtl  INT AUTO_INCREMENT PRIMARY KEY,
-      idgrn     INT NOT NULL,
+    CREATE TABLE bpbdtl (
+      idbpbdtl  INT AUTO_INCREMENT PRIMARY KEY,
+      idbpb     INT NOT NULL,
       idtenant  INT NOT NULL,
       idbarang  INT NOT NULL,
       idpodtl   INT DEFAULT NULL,
@@ -1064,7 +1060,7 @@ async function migrate() {
       satuan    VARCHAR(20) DEFAULT NULL,
       harga     DECIMAL(15,2) DEFAULT 0,
       subtotal  DECIMAL(15,2) DEFAULT 0,
-      FOREIGN KEY (idgrn) REFERENCES grn(idgrn) ON DELETE CASCADE,
+      FOREIGN KEY (idbpb) REFERENCES bpb(idbpb) ON DELETE CASCADE,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idbarang) REFERENCES barang(idbarang)
     ) ENGINE=InnoDB
@@ -1357,10 +1353,10 @@ async function migrate() {
 
   // Seed menu — children: Pembelian
   const pembelianChildren = [
-    [29, 4, 'pembelian.transaksi',     'Transaksi Beli',    1, null, '/pembelian'],
-    [30, 4, 'pembelian.retur',         'Retur Pembelian',   2, null, '/pembelian/retur'],
-    [37, 4, 'pembelian.po',            'Purchase Order',    3, null, '/pembelian/po'],
-    [38, 4, 'pembelian.grn',           'GRN',               4, null, '/pembelian/grn'],
+    [37, 4, 'pembelian.po',            'Purchase Order (PO)',              1, null, '/pembelian/po'],
+    [38, 4, 'pembelian.bpb',           'Bukti Penerimaan Barang (BPB)',    2, null, '/pembelian/bpb'],
+    [29, 4, 'pembelian.transaksi',     'Pembelian',                        3, null, '/pembelian'],
+    [30, 4, 'pembelian.retur',         'Retur Pembelian',                  4, null, '/pembelian/retur'],
   ];
   for (const m of pembelianChildren) {
     await connection.query(

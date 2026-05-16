@@ -208,9 +208,9 @@ async function generateKodePO(conn, idtenant, idlokasi) {
   return generateKode(conn, 'PO', idtenant, idlokasi, 'purchaseorder', 'kodepo');
 }
 
-// Generate kode GRN: format GRN.KODELOKASI.YYMMDD.NNN
-async function generateKodeGRN(conn, idtenant, idlokasi) {
-  return generateKode(conn, 'GRN', idtenant, idlokasi, 'grn', 'kodegrn');
+// Generate kode BPB: format BPB.KODELOKASI.YYMMDD.NNN
+async function generateKodeBPB(conn, idtenant, idlokasi) {
+  return generateKode(conn, 'BPB', idtenant, idlokasi, 'bpb', 'kodebpb');
 }
 
 // Generate kode stock opname: format SO.KODELOKASI.YYMMDD.NNN
@@ -262,7 +262,7 @@ module.exports = {
   generateKodeTransferStok,
   generateKodeShift,
   generateKodePO,
-  generateKodeGRN,
+  generateKodeBPB,
   generateKodeStockOpname,
   generateKodePayroll,
 };

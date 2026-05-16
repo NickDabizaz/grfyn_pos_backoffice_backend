@@ -29,7 +29,7 @@ exports.create = async (req, res) => {
     // Insert header returbeli
     let sql = 'INSERT INTO returbeli (idtenant, idlokasi, kodereturbeli, tgltrans, idsupplier, idbeli, kodebeli, iduser, total, catatan, status, userentry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)';
     await conn.query(sql,
-      [ctx.idtenant, idlokasi, kodereturbeli, tgl, idsupplier, idbeli || null, kodebeli || null, ctx.iduser, catatan || null, 'AKTIF', ctx.iduser]
+      [ctx.idtenant, idlokasi, kodereturbeli, tgl, idsupplier, idbeli || null, kodebeli || null, ctx.iduser, catatan || null, 'APPROVED', ctx.iduser]
     );
 
     let [[header]] = await conn.query(
@@ -141,7 +141,7 @@ exports.getOne = async (req, res) => {
   }
 };
 
-// PUT — Membatalkan retur pembelian: ubah status ke VOID, balik stok (masuk kembali), hapus kartu hutang retur
+// PUT — Membatalkan retur pembelian: ubah status ke CANCELLED, balik stok (masuk kembali), hapus kartu hutang retur
 exports.cancel = async (req, res) => {
   const conn = await getConnection();
   try {
@@ -157,14 +157,14 @@ exports.cancel = async (req, res) => {
       await conn.rollback();
       return res.status(404).json({ message: 'Retur pembelian tidak ditemukan' });
     }
-    if (retur.status === 'VOID') {
+    if (retur.status === 'CANCELLED') {
       await conn.rollback();
       return res.status(400).json({ message: 'Retur pembelian sudah dibatalkan' });
     }
 
     await conn.query(
       'UPDATE returbeli SET status = ? WHERE idreturbeli = ? AND idtenant = ? AND idlokasi = ?',
-      ['VOID', id, ctx.idtenant, retur.idlokasi]
+      ['CANCELLED', id, ctx.idtenant, retur.idlokasi]
     );
 
     // Hapus catatan hutang retur terkait
@@ -179,11 +179,11 @@ exports.cancel = async (req, res) => {
     );
     const today = new Date().toISOString().slice(0, 10);
 
-    // Balik stok: barang yang sudah keluar dikembalikan masuk (VOID retur → stok masuk kembali)
+    // Balik stok: barang yang sudah keluar dikembalikan masuk (CANCELLED retur → stok masuk kembali)
     for (const dtl of details) {
       await conn.query(
         'INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idref, jenisref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [ctx.idtenant, retur.idlokasi, `VOID-${retur.kodereturbeli}`, dtl.idbarang, dtl.jml, 'M', today, `Batal Retur Beli ${retur.kodereturbeli}`, retur.idreturbeli, 'returbeli_void']
+        [ctx.idtenant, retur.idlokasi, `CANCEL-${retur.kodereturbeli}`, dtl.idbarang, dtl.jml, 'M', today, `Batal Retur Beli ${retur.kodereturbeli}`, retur.idreturbeli, 'returbeli_cancel']
       );
     }
 

@@ -1,17 +1,17 @@
 # Modul Pembelian
 
 ## Overview
-Modul transaksi pembelian. Menangani faktur beli, retur pembelian, Purchase Order (PO), dan Goods Receipt Note (GRN). Terintegrasi dengan stok, hutang, dan jurnal.
+Modul transaksi pembelian. Menangani faktur beli, retur pembelian, Purchase Order (PO), dan Bukti Penerimaan Barang (BPB). Terintegrasi dengan stok, hutang, dan histori harga beli.
 
 ## File List
 - `beliController.js`
 - `returbeliController.js`
 - `purchaseOrderController.js`
-- `grnController.js`
+- `bpbController.js`
 - `routes/beli.js`
 - `routes/returbeli.js`
 - `routes/purchaseOrder.js`
-- `routes/grn.js`
+- `routes/bpb.js`
 
 ## Endpoint Summary
 | Method | Path | Fungsi |
@@ -19,14 +19,14 @@ Modul transaksi pembelian. Menangani faktur beli, retur pembelian, Purchase Orde
 | CRUD | /api/beli | Faktur pembelian |
 | CRUD | /api/returbeli | Retur pembelian |
 | CRUD | /api/purchase-order | Purchase Order |
-| CRUD | /api/grn | Goods Receipt Note |
+| CRUD | /api/bpb | Bukti Penerimaan Barang |
 
 ## Business Rules
-- Konversi satuan ke `satuankecil` via `toKecilJml()` sebelum insert `kartustok`
-- PO flow: DRAFT → APPROVED → (GRN) → COMPLETE / PARTIAL
-- GRN otomatis buat faktur beli (`beli`) + update `jml_diterima` di PO
-- Edit beli: clean-slate approach (hapus semua lalu rebuild)
-- Cancel beli blocked jika hutang sudah LUNAS
+- PO flow: DRAFT -> APPROVED -> CONFIRMED / CANCELLED
+- BPB dibuat dari PO APPROVED dan mengubah PO menjadi CONFIRMED
+- Pembelian DRAFT tidak membentuk stok, hutang, pelunasan, atau harga beli
+- Pembelian APPROVED membentuk kartu stok, kartu hutang/pelunasan, dan histori harga beli
+- Cancel beli membalik stok/hutang dan menonaktifkan histori harga beli transaksi tersebut
 
 ## Tabel DB Terkait
 - `beli`
@@ -40,12 +40,9 @@ Modul transaksi pembelian. Menangani faktur beli, retur pembelian, Purchase Orde
 - `returbelidtl`
 - `purchaseorder`
 - `purchaseorderdtl`
-- `grn`
-- `grndtl`
+- `bpb`
+- `bpbdtl`
 - `jurnal`
 
 ## Dependencies
-- `lib/kodetrans` (`generateKodeBeli`, `generateKodePO`, `generateKodeGRN`, `generateKodeReturBeli`, `generateKodePelunasanHutang`)
-
-## Known Limitations / TODO
-- Tidak ada
+- `lib/kodetrans` (`generateKodeBeli`, `generateKodePO`, `generateKodeBPB`, `generateKodeReturBeli`, `generateKodePelunasanHutang`)
