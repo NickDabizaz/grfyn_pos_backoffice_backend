@@ -23,6 +23,14 @@ const DEFAULT_COA = [
   ['5-1003', 'Beban Gaji',              'BEBAN',       'DEBET'],
 ];
 
+async function seedDefaultCustomer(conn, idtenant, iduser = 0) {
+  await conn.query(
+    `INSERT IGNORE INTO customer (idtenant, kodecustomer, namacustomer, alamat, hp, status, userentry)
+     VALUES (?, 'CASH', 'CASH', '', '', 'AKTIF', ?)`,
+    [idtenant, iduser]
+  );
+}
+
 function signLoginToken(user, loc) {
   return jwt.sign(
     {
@@ -203,10 +211,12 @@ exports.register = async (req, res) => {
         [idtenant, kode, nama, jenis, saldo, 'AKTIF', 0]
       );
     }
+    await seedDefaultCustomer(conn, idtenant, iduser);
 
     await setConfigValue(conn, idtenant, 'GLOBAL', 'CEKMINUS', 'TIDAK', 1);
     await setConfigValue(conn, idtenant, 'BARANG', 'PAKAIBAHANBAKU', 'YA', 1);
     await setConfigValue(conn, idtenant, 'GLOBAL', 'PAKAIPPN', 'YA', 1);
+    await setConfigValue(conn, idtenant, 'POS', 'HARGA_INCLUDE_PPN', 'YA', 1);
 
     await conn.commit();
 

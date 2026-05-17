@@ -57,6 +57,25 @@ function toKecilJml(jml, satuan, barang) {
   return jml;
 }
 
+async function ensureCashCustomer(conn, { idtenant, iduser }) {
+  const [[existing]] = await conn.query(
+    "SELECT idcustomer FROM customer WHERE idtenant = ? AND kodecustomer = 'CASH' LIMIT 1",
+    [idtenant]
+  );
+  if (existing) return existing.idcustomer;
+
+  const [result] = await conn.query(
+    `INSERT INTO customer (idtenant, kodecustomer, namacustomer, alamat, hp, status, userentry)
+     VALUES (?, 'CASH', 'CASH', '', '', 'AKTIF', ?)`,
+    [idtenant, iduser || 0]
+  );
+  return result.insertId;
+}
+
+function roundMoney(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
 // POST /api/pos/transaksi
 exports.createTransaksi = async (req, res) => {
   const conn = await getConnection();
@@ -88,30 +107,37 @@ exports.createTransaksi = async (req, res) => {
 
     const [[tenant]]  = await conn.query('SELECT ppn FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
     const ppnPercent  = tenant ? parseFloat(tenant.ppn) : 11;
+    const hargaIncludePpn = String(await getConfigValue(conn, ctx.idtenant, 'POS', 'HARGA_INCLUDE_PPN') || 'YA').toUpperCase() === 'YA';
+    const ppnRate = ppnPercent > 0 ? ppnPercent / 100 : 0;
+    const idcustomer = await ensureCashCustomer(conn, { idtenant: ctx.idtenant, iduser: ctx.iduser });
     let grandTotal  = 0;
 
     const [headerResult] = await conn.query(
       `INSERT INTO jual (idtenant, idlokasi, kodejual, tgltrans, idcustomer, iduser, grandtotal, bayar, jenistransaksi, is_lunaslangsung, status, userentry)
-       VALUES (?, ?, ?, ?, NULL, ?, 0, 0, ?, 1, ?, ?)`,
-      [ctx.idtenant, ctx.idlokasi, kodejual, tgltrans, ctx.iduser, jenistransaksi, statusJual, ctx.iduser]
+       VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, 1, ?, ?)`,
+      [ctx.idtenant, ctx.idlokasi, kodejual, tgltrans, idcustomer, ctx.iduser, jenistransaksi, statusJual, ctx.iduser]
     );
     const idjual = headerResult.insertId;
 
     for (const item of items) {
-      const harga   = parseFloat(item.harga);
+      const hargaInput = parseFloat(item.harga) || 0;
       const jml     = parseFloat(item.jml) || 1;
       const diskon  = parseFloat(item.diskon) || 0;
 
-      const ppnMode = item.ppn_mode || 'INCLUDE';
-      const ppnRp   = ppnMode === 'INCLUDE' ? (harga * jml * ppnPercent) / 100 : 0;
-      const disknRp = (harga * jml * diskon) / 100;
-      const subTtl  = (harga * jml) + ppnRp - disknRp;
+      const hargaDasar = hargaIncludePpn && ppnRate > 0
+        ? roundMoney(hargaInput / (1 + ppnRate))
+        : roundMoney(hargaInput);
+      const dppSebelumDiskon = hargaDasar * jml;
+      const disknRp = roundMoney((dppSebelumDiskon * diskon) / 100);
+      const dppSetelahDiskon = Math.max(dppSebelumDiskon - disknRp, 0);
+      const ppnRp = roundMoney(dppSetelahDiskon * ppnRate);
+      const subTtl = roundMoney(dppSetelahDiskon + ppnRp);
 
       grandTotal += subTtl;
 
       await conn.query(
         'INSERT INTO jualdtl (idjual, idtenant, idbarang, jml, harga, ppn, diskon, subtotal, satuan) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [idjual, ctx.idtenant, item.idbarang, jml, harga, ppnRp, diskon, subTtl, item.satuan || null]
+        [idjual, ctx.idtenant, item.idbarang, jml, hargaDasar, ppnRp, diskon, subTtl, item.satuan || null]
       );
 
       const [[barangInfo]] = await conn.query('SELECT satuanbesar, satuansedang, satuankecil, konversi1, konversi2 FROM barang WHERE idbarang = ? AND idtenant = ?', [item.idbarang, ctx.idtenant]);
@@ -123,19 +149,20 @@ exports.createTransaksi = async (req, res) => {
       );
     }
 
+    grandTotal = roundMoney(grandTotal);
     await conn.query('UPDATE jual SET grandtotal = ?, bayar = ? WHERE idjual = ?', [grandTotal, grandTotal, idjual]);
 
     // Piutang and Pelunasan
     await conn.query(
-      'INSERT INTO kartupiutang (idtenant, idlokasi, idcustomer, kodetrans, jenis, amount, terbayar, sisa, tgltrans, status) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)',
-      [ctx.idtenant, ctx.idlokasi, kodejual, 'JUAL', grandTotal, grandTotal, 0, tgltrans, 'LUNAS']
+      'INSERT INTO kartupiutang (idtenant, idlokasi, idcustomer, kodetrans, jenis, amount, terbayar, sisa, tgltrans, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [ctx.idtenant, ctx.idlokasi, idcustomer, kodejual, 'JUAL', grandTotal, grandTotal, 0, tgltrans, 'LUNAS']
     );
 
     if (grandTotal > 0) {
       const kodepelunasan = await generateKodePelunasanPiutang(conn, ctx.idtenant, ctx.idlokasi);
       const [pelResult] = await conn.query(
-        'INSERT INTO pelunasanpiutang (idtenant, idlokasi, idcustomer, kodepelunasan, tgltrans, total_amount, metodbayar, catatan, userentry) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?)',
-        [ctx.idtenant, ctx.idlokasi, kodepelunasan, tgltrans, grandTotal, metodbayar || 'TUNAI', `Pelunasan POS ${kodejual}`, ctx.iduser]
+        'INSERT INTO pelunasanpiutang (idtenant, idlokasi, idcustomer, kodepelunasan, tgltrans, total_amount, metodbayar, catatan, userentry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [ctx.idtenant, ctx.idlokasi, idcustomer, kodepelunasan, tgltrans, grandTotal, metodbayar || 'TUNAI', `Pelunasan POS ${kodejual}`, ctx.iduser]
       );
       await conn.query('INSERT INTO pelunasanpiutangdtl (idpelunasan, kodetrans, amount) VALUES (?, ?, ?)', [pelResult.insertId, kodejual, grandTotal]);
     }
@@ -348,8 +375,12 @@ exports.getSetting = async (req, res) => {
   try {
     const ctx = getTenantContext();
     const nonTunai = await getConfigValue(pool, ctx.idtenant, 'POS', 'NON_TUNAI');
+    const hargaIncludePpn = await getConfigValue(pool, ctx.idtenant, 'POS', 'HARGA_INCLUDE_PPN');
+    const [[tenant]] = await pool.query('SELECT ppn FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
     res.json({
-      non_tunai: nonTunai ? JSON.parse(nonTunai) : []
+      non_tunai: nonTunai ? JSON.parse(nonTunai) : [],
+      harga_include_ppn: String(hargaIncludePpn || 'YA').toUpperCase() === 'YA',
+      ppn_percent: parseFloat(tenant?.ppn || 0),
     });
   } catch (err) {
     logger.error(err, { req });
@@ -361,9 +392,12 @@ exports.getSetting = async (req, res) => {
 exports.saveSetting = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const { non_tunai } = req.body;
+    const { non_tunai, harga_include_ppn } = req.body;
     if (non_tunai) {
       await setConfigValue(pool, ctx.idtenant, 'POS', 'NON_TUNAI', JSON.stringify(non_tunai), ctx.iduser);
+    }
+    if (harga_include_ppn !== undefined) {
+      await setConfigValue(pool, ctx.idtenant, 'POS', 'HARGA_INCLUDE_PPN', harga_include_ppn ? 'YA' : 'TIDAK', ctx.iduser);
     }
     res.json({ message: 'Setting berhasil disimpan' });
   } catch (err) {

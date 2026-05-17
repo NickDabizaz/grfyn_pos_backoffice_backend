@@ -5,6 +5,9 @@ const DEFAULT_CONFIGS = {
   BARANG: {
     PAKAIBAHANBAKU: 'YA',
   },
+  POS: {
+    HARGA_INCLUDE_PPN: 'YA',
+  },
 };
 
 let configTableReady = false;

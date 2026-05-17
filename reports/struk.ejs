@@ -67,7 +67,7 @@
       <div class="item-name"><%= item.namabarang %></div>
       <div class="item-detail">
         <span><%= Number(item.jml).toLocaleString('id-ID') %> <%= item.satuankecil %> x Rp <%= Number(item.harga).toLocaleString('id-ID') %></span>
-        <span> <%= Number(item.subtotal).toLocaleString('id-ID') %></span>
+        <span> <%= Number(Number(item.harga || 0) * Number(item.jml || 0)).toLocaleString('id-ID') %></span>
       </div>
       <% if (item.diskon > 0) { %>
       <div class="item-detail" style="color:#C4683D;">Diskon: <%= item.diskon %>%</div>

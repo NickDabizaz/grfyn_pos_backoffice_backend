@@ -1342,9 +1342,10 @@ exports.struk = async (req, res) => {
     const format = req.query.format || 'json';
 
     const rows = await tenantQuery(
-      `SELECT j.*, c.namacustomer, c.alamat as alamatcustomer
+      `SELECT j.*, c.namacustomer, c.alamat as alamatcustomer, u.namauser
        FROM jual j
        LEFT JOIN customer c ON j.idcustomer = c.idcustomer AND c.idtenant = j.idtenant
+       LEFT JOIN user u ON j.iduser = u.iduser AND u.idtenant = j.idtenant
        WHERE j.idjual = ? AND j.idlokasi = ?`,
       [id, ctx.idlokasi]
     );
@@ -1352,7 +1353,7 @@ exports.struk = async (req, res) => {
     const jual = rows[0];
 
     const detail = await tenantQuery(
-      `SELECT jd.*, b.namabarang, b.kodebarang, b.satuankecil as satuan
+      `SELECT jd.*, b.namabarang, b.kodebarang, b.satuankecil as satuan, b.satuankecil
        FROM jualdtl jd
        LEFT JOIN barang b ON jd.idbarang = b.idbarang AND b.idtenant = jd.idtenant
        WHERE jd.idjual = ?`,
@@ -1360,12 +1361,29 @@ exports.struk = async (req, res) => {
     );
 
     if (format === 'html') {
+      const subtotal = detail.reduce((sum, item) => sum + (Number(item.harga || 0) * Number(item.jml || 0)), 0);
+      const ppn = detail.reduce((sum, item) => sum + Number(item.ppn || 0), 0);
+      const totalDiskon = detail.reduce((sum, item) => {
+        const harga = Number(item.harga || 0);
+        const jml = Number(item.jml || 0);
+        const diskon = Number(item.diskon || 0);
+        return sum + ((harga * jml * diskon) / 100);
+      }, 0);
       let sqlTenantStruk = 'SELECT * FROM tenant WHERE idtenant = ?';
       const [[tenant]] = await pool.query(sqlTenantStruk, [ctx.idtenant]);
       let sqlLokasiStruk = 'SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?';
       const [[lokasi]] = await pool.query(sqlLokasiStruk, [ctx.idlokasi, ctx.idtenant]);
       return res.render('struk', {
         jual, detail,
+        ...jual,
+        items: detail,
+        kasir: jual.namauser,
+        subtotal,
+        ppn,
+        totalDiskon,
+        grandtotal: Number(jual.grandtotal || 0),
+        bayar: Number(jual.bayar || jual.grandtotal || 0),
+        kembali: Math.max(Number(jual.bayar || jual.grandtotal || 0) - Number(jual.grandtotal || 0), 0),
         namatoko: tenant?.namatenant || 'Grfyn POS',
         alamat: lokasi?.alamat || '',
         hp: lokasi?.hp || '',

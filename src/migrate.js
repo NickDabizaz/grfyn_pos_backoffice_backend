@@ -1514,7 +1514,15 @@ async function seedDefaultCOA(conn, idtenant) {
   }
 }
 
-module.exports = { seedDefaultCOA };
+async function seedDefaultCustomer(conn, idtenant, iduser = 0) {
+  await conn.query(
+    `INSERT IGNORE INTO customer (idtenant, kodecustomer, namacustomer, alamat, hp, status, userentry)
+     VALUES (?, 'CASH', 'CASH', '', '', 'AKTIF', ?)`,
+    [idtenant, iduser]
+  );
+}
+
+module.exports = { seedDefaultCOA, seedDefaultCustomer };
 
 migrate().catch(err => {
   console.error('Migration failed:', err);
