@@ -1334,15 +1334,15 @@ async function migrate() {
 
   // Seed menu — top-level
   const topMenus = [
-    [1, null, 'dashboard',           'Dashboard',           1, 'LayoutDashboard', '/'],
-    [2, null, 'pos',                 'POS',                 2, 'ShoppingCart',    '/pos'],
-    [3, null, 'master',              'Master',              3, 'Package',         null],
-    [4, null, 'pembelian',           'Pembelian',           4, 'ShoppingBag',     '/pembelian'],
-    [5, null, 'penjualan',           'Penjualan',           5, 'ReceiptText',     '/penjualan'],
-    [6, null, 'stok',                'Stok',                6, 'Warehouse',       null],
-    [7, null, 'keuangan',            'Keuangan',            7, 'Wallet',          null],
-    [8, null, 'laporan',             'Laporan',             8, 'FileBarChart',    null],
-    [9, null, 'setting',             'Setting',             9, 'Settings',        '/setting'],
+    [1,  null, 'dashboard', 'Dashboard', 1, 'LayoutDashboard', '/'],
+    [3,  null, 'master',    'Master',    2, 'Package',         null],
+    [4,  null, 'pembelian', 'Pembelian', 3, 'ShoppingBag',     null],
+    [5,  null, 'penjualan', 'Penjualan', 4, 'ReceiptText',     null],
+    [6,  null, 'stok',      'Stok',      5, 'Warehouse',       null],
+    [7,  null, 'keuangan',  'Keuangan',  6, 'Wallet',          null],
+    [40, null, 'hr',        'HR',        7, 'Users',           null],
+    [8,  null, 'laporan',   'Laporan',   8, 'FileBarChart',    null],
+    [9,  null, 'setting',   'Setting',   9, 'Settings',        '/setting'],
   ];
   for (const m of topMenus) {
     await connection.query(
@@ -1353,12 +1353,12 @@ async function migrate() {
 
   // Seed menu — children: Master
   const masterChildren = [
-    [10, 3, 'master.barang',     'Barang',          1, null, '/master/barang'],
-    [11, 3, 'master.supplier',   'Supplier',        2, null, '/master/supplier'],
-    [12, 3, 'master.customer',   'Customer',        3, null, '/master/customer'],
-    [13, 3, 'master.akun',       'Akun',            4, null, '/master/akun'],
-    [14, 3, 'master.user',       'User',            5, null, '/master/user'],
-    [15, 3, 'master.lokasi',     'Lokasi',          6, null, '/master/lokasi'],
+    [14, 3, 'master.user',     'User',     1, null, '/master/user'],
+    [10, 3, 'master.barang',   'Barang',   2, null, '/master/barang'],
+    [12, 3, 'master.customer', 'Customer', 3, null, '/master/customer'],
+    [11, 3, 'master.supplier', 'Supplier', 4, null, '/master/supplier'],
+    [15, 3, 'master.lokasi',   'Lokasi',   5, null, '/master/lokasi'],
+    [13, 3, 'master.akun',     'Akun',     6, null, '/master/akun'],
   ];
   for (const m of masterChildren) {
     await connection.query(
@@ -1367,70 +1367,12 @@ async function migrate() {
     );
   }
 
-  // Seed menu — children: Stok
-  const stokChildren = [
-    [16, 6, 'stok.saldoawal',    'Saldo Awal Stok',             1, null, '/stok/saldoawal'],
-    [17, 6, 'stok.penyesuaian',  'Penyesuaian Stok',            2, null, '/stok/penyesuaian'],
-    [18, 6, 'stok.kartustok',    'Kartu Stok',                  3, null, '/stok/kartustok'],
-    [24, 6, 'stok.hitunghpp',    'Hitung HPP',                  4, null, '/stok/hitunghpp'],
-    [34, 6, 'stok.produksi',     'Produksi',                     5, null, '/stok/produksi'],
-  ];
-  for (const m of stokChildren) {
-    await connection.query(
-      'INSERT INTO menu (idmenu, idparent, kodemenu, namamenu, urutan, icon, path) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      m
-    );
-  }
-
-  // Seed menu — children: Penjualan
-  const penjualanChildren = [
-    [27, 5, 'penjualan.so',           'Sales Order (SO)',              1, null, '/penjualan/so'],
-    [49, 5, 'penjualan.bpk',          'Bukti Pengeluaran Barang (BPK)', 2, null, '/penjualan/bpk'],
-    [25, 5, 'penjualan.transaksi',    'Transaksi Jual',                3, null, '/penjualan'],
-    [26, 5, 'penjualan.retur',        'Retur Penjualan',               4, null, '/penjualan/retur'],
-  ];
-  for (const m of penjualanChildren) {
-    await connection.query(
-      'INSERT INTO menu (idmenu, idparent, kodemenu, namamenu, urutan, icon, path) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      m
-    );
-  }
-
-  // Seed menu — children: Laporan
-  const laporanChildren = [
-    [19, 8, 'laporan.penjualan',       'Penjualan',       1, null, '/laporan/penjualan'],
-    [20, 8, 'laporan.pembelian',       'Pembelian',       2, null, '/laporan/pembelian'],
-    [21, 8, 'laporan.barang',          'Barang',          3, null, '/laporan/master/barang'],
-    [22, 8, 'laporan.stoksekarang',    'Stok Sekarang',   4, null, '/laporan/stok/sekarang'],
-    [23, 8, 'laporan.kartustok',       'Kartu Stok',      5, null, '/laporan/stok/kartustok'],
-    [28, 8, 'laporan.rekapsales',      'Rekap Sales',     6, null, '/laporan/rekap-sales'],
-  ];
-  for (const m of laporanChildren) {
-    await connection.query(
-      'INSERT INTO menu (idmenu, idparent, kodemenu, namamenu, urutan, icon, path) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      m
-    );
-  }
-
-  // Seed menu — children: Keuangan
-  const keuanganChildren = [
-    [31, 7, 'keuangan.kas',                'Kas',                 1, null, '/kas'],
-    [32, 7, 'keuangan.pelunasanpiutang',   'Pelunasan Piutang',   2, null, '/keuangan/pelunasanpiutang'],
-    [33, 7, 'keuangan.pelunasanhutang',    'Pelunasan Hutang',    3, null, '/keuangan/pelunasanhutang'],
-  ];
-  for (const m of keuanganChildren) {
-    await connection.query(
-      'INSERT INTO menu (idmenu, idparent, kodemenu, namamenu, urutan, icon, path) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      m
-    );
-  }
-
   // Seed menu — children: Pembelian
   const pembelianChildren = [
-    [37, 4, 'pembelian.po',            'Purchase Order (PO)',              1, null, '/pembelian/po'],
-    [38, 4, 'pembelian.bpb',           'Bukti Penerimaan Barang (BPB)',    2, null, '/pembelian/bpb'],
-    [29, 4, 'pembelian.transaksi',     'Pembelian',                        3, null, '/pembelian'],
-    [30, 4, 'pembelian.retur',         'Retur Pembelian',                  4, null, '/pembelian/retur'],
+    [37, 4, 'pembelian.po',        'Purchase Order (PO)',           1, null, '/pembelian/po'],
+    [38, 4, 'pembelian.bpb',       'Bukti Penerimaan Barang (BPB)', 2, null, '/pembelian/bpb'],
+    [29, 4, 'pembelian.transaksi', 'Pembelian',                     3, null, '/pembelian'],
+    [30, 4, 'pembelian.retur',     'Retur Pembelian',               4, null, '/pembelian/retur'],
   ];
   for (const m of pembelianChildren) {
     await connection.query(
@@ -1439,44 +1381,107 @@ async function migrate() {
     );
   }
 
-  // Seed menu — children: Transfer Stok + Stock Opname (parent: stok)
-  const stokNewChildren = [
-    [35, 6, 'stok.transferstok',       'Transfer Stok',     6, null, '/stok/transfer'],
-    [39, 6, 'stok.stockopname',        'Stock Opname',      7, null, '/stok/opname'],
+  // Seed menu — children: Penjualan
+  const penjualanChildren = [
+    [27, 5, 'penjualan.so',        'Sales Order (SO)',               1, null, '/penjualan/so'],
+    [49, 5, 'penjualan.bpk',       'Bukti Pengeluaran Barang (BPK)', 2, null, '/penjualan/bpk'],
+    [25, 5, 'penjualan.transaksi', 'Penjualan',                      3, null, '/penjualan'],
+    [26, 5, 'penjualan.retur',     'Retur Penjualan',                4, null, '/penjualan/retur'],
   ];
-  for (const m of stokNewChildren) {
+  for (const m of penjualanChildren) {
     await connection.query(
       'INSERT INTO menu (idmenu, idparent, kodemenu, namamenu, urutan, icon, path) VALUES (?, ?, ?, ?, ?, ?, ?)',
       m
     );
   }
 
-  // Seed menu — SDM parent + children
-  await connection.query(
-    'INSERT INTO menu (idmenu, idparent, kodemenu, namamenu, urutan, icon, path) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [40, null, 'sdm', 'SDM', 10, 'Users', null]
-  );
-  const sdmChildren = [
-    [41, 40, 'sdm.karyawan',   'Karyawan',   1, null, '/sdm/karyawan'],
-    [42, 40, 'sdm.absensi',    'Absensi',    2, null, '/sdm/absensi'],
-    [43, 40, 'sdm.payroll',    'Payroll',    3, null, '/sdm/payroll'],
+  // Seed menu — children: Stok
+  const stokChildren = [
+    [16, 6, 'stok.saldoawal',    'Saldo Stok',  1, null, '/stok/saldoawal'],
+    [39, 6, 'stok.stockopname',  'Opname Stok', 2, null, '/stok/opname'],
+    [35, 6, 'stok.transferstok', 'Transfer',    3, null, '/stok/transfer'],
+    [24, 6, 'stok.hitunghpp',    'Hitung HPP',  4, null, '/stok/hitunghpp'],
   ];
-  for (const m of sdmChildren) {
+  for (const m of stokChildren) {
     await connection.query(
       'INSERT INTO menu (idmenu, idparent, kodemenu, namamenu, urutan, icon, path) VALUES (?, ?, ?, ?, ?, ?, ?)',
       m
     );
   }
 
-  // Seed menu — Laporan Keuangan children (parent: laporan)
-  const laporanKeuanganChildren = [
-    [44, 8, 'laporan.neracasaldo',     'Neraca Saldo',     7, null, '/laporan/neraca-saldo'],
-    [45, 8, 'laporan.labarugi',        'Laba Rugi',        8, null, '/laporan/laba-rugi'],
-    [46, 8, 'laporan.neraca',          'Neraca',           9, null, '/laporan/neraca'],
-    [47, 8, 'laporan.bukubesar',       'Buku Besar',       10, null, '/laporan/buku-besar'],
-    [48, 8, 'laporan.closing',         'Closing Periode',  11, null, '/laporan/closing'],
+  // Seed menu — children: Keuangan
+  const keuanganChildren = [
+    [31, 7, 'keuangan.kas',              'Kas',              1, null, '/kas'],
+    [33, 7, 'keuangan.pelunasanhutang',  'Pelunasan Hutang', 2, null, '/keuangan/pelunasanhutang'],
+    [32, 7, 'keuangan.pelunasanpiutang', 'Pelunasan Piutang',3, null, '/keuangan/pelunasanpiutang'],
   ];
-  for (const m of laporanKeuanganChildren) {
+  for (const m of keuanganChildren) {
+    await connection.query(
+      'INSERT INTO menu (idmenu, idparent, kodemenu, namamenu, urutan, icon, path) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      m
+    );
+  }
+
+  // Seed menu — children: HR
+  const hrChildren = [
+    [41, 40, 'sdm.karyawan', 'Karyawan', 1, null, '/sdm/karyawan'],
+    [42, 40, 'sdm.absensi',  'Absensi',  2, null, '/sdm/absensi'],
+    [43, 40, 'sdm.payroll',  'Gaji',     3, null, '/sdm/payroll'],
+  ];
+  for (const m of hrChildren) {
+    await connection.query(
+      'INSERT INTO menu (idmenu, idparent, kodemenu, namamenu, urutan, icon, path) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      m
+    );
+  }
+
+  // Seed menu — Laporan: grup level-1 (parent: laporan idmenu=8)
+  const laporanGrp = [
+    [50, 8, 'laporan.pembelian', 'Pembelian', 1, null, null],
+    [51, 8, 'laporan.penjualan', 'Penjualan', 2, null, null],
+    [52, 8, 'laporan.stok',      'Stok',      3, null, null],
+  ];
+  for (const m of laporanGrp) {
+    await connection.query(
+      'INSERT INTO menu (idmenu, idparent, kodemenu, namamenu, urutan, icon, path) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      m
+    );
+  }
+
+  // Seed menu — Laporan Pembelian leaves (parent: 50)
+  const laporanPembelianLeaves = [
+    [53, 50, 'laporan.pembelian.po',        'Purchase Order (PO)',           1, null, null],
+    [54, 50, 'laporan.pembelian.bpb',       'Bukti Penerimaan Barang (BPB)', 2, null, null],
+    [55, 50, 'laporan.pembelian.transaksi', 'Pembelian',                     3, null, null],
+    [56, 50, 'laporan.pembelian.retur',     'Retur Pembelian',               4, null, null],
+  ];
+  for (const m of laporanPembelianLeaves) {
+    await connection.query(
+      'INSERT INTO menu (idmenu, idparent, kodemenu, namamenu, urutan, icon, path) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      m
+    );
+  }
+
+  // Seed menu — Laporan Penjualan leaves (parent: 51)
+  const laporanPenjualanLeaves = [
+    [57, 51, 'laporan.penjualan.so',        'Sales Order (SO)',               1, null, null],
+    [58, 51, 'laporan.penjualan.bpk',       'Bukti Pengeluaran Barang (BPK)', 2, null, null],
+    [59, 51, 'laporan.penjualan.transaksi', 'Penjualan',                      3, null, null],
+    [60, 51, 'laporan.penjualan.retur',     'Retur Penjualan',                4, null, null],
+  ];
+  for (const m of laporanPenjualanLeaves) {
+    await connection.query(
+      'INSERT INTO menu (idmenu, idparent, kodemenu, namamenu, urutan, icon, path) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      m
+    );
+  }
+
+  // Seed menu — Laporan Stok leaves (parent: 52)
+  const laporanStokLeaves = [
+    [61, 52, 'laporan.stok.sekarang',  'Stok',       1, null, null],
+    [62, 52, 'laporan.stok.kartustok', 'Kartu Stok', 2, null, null],
+  ];
+  for (const m of laporanStokLeaves) {
     await connection.query(
       'INSERT INTO menu (idmenu, idparent, kodemenu, namamenu, urutan, icon, path) VALUES (?, ?, ?, ?, ?, ?, ?)',
       m
