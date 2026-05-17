@@ -19,4 +19,12 @@ router.get('/rekap-sales', auth, ctrl.rekapSales);
 router.get('/struk/:id', auth, ctrl.struk);
 router.get('/faktur/:id', auth, ctrl.faktur);
 
+// Fase 3 — Laporan Baru
+router.get('/sales-order', auth, ctrl.salesOrder);
+router.get('/bpk', auth, ctrl.bpk);
+router.get('/retur-jual', auth, ctrl.returJual);
+router.get('/purchase-order', auth, ctrl.purchaseOrder);
+router.get('/bpb', auth, ctrl.bpb);
+router.get('/retur-beli', auth, ctrl.returBeli);
+
 module.exports = router;

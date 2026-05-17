@@ -22,6 +22,48 @@ exports.getJenisTransaksiKartuStok = async (req, res) => {
 exports.getJenisRef = exports.getJenisTransaksiKartuStok;
 
 
+// Helper: buildAdvancedFilter — terima JSON [{field, op, value}], hasilkan {clause, params}
+// Logic: entri dengan field sama → OR; antar grup field berbeda → AND
+function buildAdvancedFilter(filtersJson) {
+  if (!filtersJson) return { clause: '', params: [] };
+  let parsed;
+  try { parsed = JSON.parse(filtersJson); } catch { return { clause: '', params: [] }; }
+  if (!Array.isArray(parsed) || parsed.length === 0) return { clause: '', params: [] };
+
+  const FIELD_COL = {
+    namacustomer  : 'c.namacustomer',
+    kodecustomer  : 'c.kodecustomer',
+    alamatcustomer: 'c.alamat',
+    namasupplier  : 's.namasupplier',
+    kodesupplier  : 's.kodesupplier',
+    alamatsupplier: 's.alamat',
+    namabarang    : 'b.namabarang',
+    kodebarang    : 'b.kodebarang',
+  };
+
+  const groups = {};
+  for (const f of parsed) {
+    const col = FIELD_COL[f.field];
+    if (!col || !f.value) continue;
+    if (!groups[f.field]) groups[f.field] = [];
+    groups[f.field].push({ col, op: f.op, value: f.value });
+  }
+
+  const groupClauses = [];
+  const allParams = [];
+
+  for (const entries of Object.values(groups)) {
+    const orParts = entries.map(({ col, op, value }) => {
+      if (op === 'ADALAH') { allParams.push(value); return `${col} = ?`; }
+      else { allParams.push(`%${value}%`); return `${col} LIKE ?`; }
+    });
+    groupClauses.push(`(${orParts.join(' OR ')})`);
+  }
+
+  if (groupClauses.length === 0) return { clause: '', params: [] };
+  return { clause: groupClauses.join(' AND '), params: allParams };
+}
+
 // Helper: membuat klausa LIKE multi-value untuk filter (misal "A,B,C" -> kodelokasi LIKE '%A%' OR kodelokasi LIKE '%B%')
 function multiLike(column, raw) {
   const vals = raw.split(',').map(s => s.trim()).filter(Boolean);
@@ -49,9 +91,10 @@ function multiIdIn(column, raw) {
 exports.salesTransaksi = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const { 
-      tglwal, tglakhir, kodelokasi, namalokasi, 
-      kodecustomer, namacustomer, statusLunas 
+    const {
+      tglwal, tglakhir, kodelokasi, namalokasi,
+      kodecustomer, namacustomer, statusLunas,
+      idlokasi, filters
     } = req.query;
     
     // Default format adalah JSON jika tidak secara eksplisit di-request 'html'
@@ -104,6 +147,11 @@ exports.salesTransaksi = async (req, res) => {
       const { clause, params: p } = multiLike('c.namacustomer', namacustomer);
       if (clause) { sql += ' AND ' + clause; params.push(...p); }
     }
+
+    // New: idlokasi multi-ID and advanced filters from LaporanPage
+    if (idlokasi) { const r = multiIdIn('j.idlokasi', idlokasi); if (r.clause) { sql += ' AND ' + r.clause; params.push(...r.params); } }
+    const af0 = buildAdvancedFilter(filters);
+    if (af0.clause) { sql += ' AND ' + af0.clause; params.push(...af0.params); }
 
     if (statusLunas === 'lunas') {
       sql += ' AND kp.sisa <= 0';
@@ -1397,6 +1445,298 @@ exports.struk = async (req, res) => {
     logger.error(err, { req });
     res.status(500).json({ message: err.message });
   }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fase 3 — Endpoint Laporan Baru
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /api/laporan/sales-order — Laporan Sales Order
+exports.salesOrder = async (req, res) => {
+  try {
+    const ctx = getTenantContext();
+    const { tglwal, tglakhir, idlokasi, filters } = req.query;
+    const format = req.query.format || 'json';
+
+    let sql = `
+      SELECT so.kodeso, so.tgltrans, so.grandtotal, so.status,
+        c.kodecustomer, c.namacustomer,
+        l.namalokasi,
+        b.kodebarang, b.namabarang, b.satuankecil AS satuan,
+        sd.jml, sd.harga, sd.subtotal
+      FROM salesorder so
+        JOIN lokasi l ON l.idlokasi = so.idlokasi AND l.idtenant = so.idtenant
+        LEFT JOIN customer c ON c.idcustomer = so.idcustomer AND c.idtenant = so.idtenant
+        JOIN salesorderdtl sd ON sd.idso = so.idso AND sd.idtenant = so.idtenant
+        JOIN barang b ON b.idbarang = sd.idbarang AND b.idtenant = so.idtenant
+      WHERE so.idtenant = ?`;
+    const params = [ctx.idtenant];
+    if (idlokasi) { const r = multiIdIn('so.idlokasi', idlokasi); if (r.clause) { sql += ' AND ' + r.clause; params.push(...r.params); } }
+    if (tglwal) { sql += ' AND so.tgltrans >= ?'; params.push(tglwal); }
+    if (tglakhir) { sql += ' AND so.tgltrans <= ?'; params.push(tglakhir); }
+    const af = buildAdvancedFilter(filters);
+    if (af.clause) { sql += ' AND ' + af.clause; params.push(...af.params); }
+    sql += ' ORDER BY so.tgltrans DESC, so.kodeso DESC, sd.idsodtl ASC';
+
+    const rows = await tenantQuery(sql, params);
+    const transactions = [];
+    let curKode = null, curGroup = null;
+    for (const row of rows) {
+      if (row.kodeso !== curKode) {
+        curKode = row.kodeso;
+        curGroup = { kodeso: row.kodeso, tgltrans: row.tgltrans, namalokasi: row.namalokasi, kodecustomer: row.kodecustomer, namacustomer: row.namacustomer, grandtotal: parseFloat(row.grandtotal) || 0, status: row.status, items: [] };
+        transactions.push(curGroup);
+      }
+      curGroup.items.push({ kodebarang: row.kodebarang, namabarang: row.namabarang, jml: row.jml, satuan: row.satuan, harga: parseFloat(row.harga) || 0, subtotal: parseFloat(row.subtotal) || 0 });
+    }
+    const grandTotal = transactions.reduce((s, t) => s + t.grandtotal, 0);
+    if (format === 'html') {
+      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      const [[lokasi]] = await pool.query('SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?', [ctx.idlokasi, ctx.idtenant]);
+      return res.render('laporan_sales_order', { transactions, grandTotal, tglwal: tglwal||'-', tglakhir: tglakhir||'-', namatoko: tenant?.namatenant||'Grfyn POS', alamat: lokasi?.alamat||'', hp: lokasi?.hp||'', logo: tenant?.logo||'', tglcetak: new Date().toLocaleDateString('id-ID',{year:'numeric',month:'long',day:'numeric'}) });
+    }
+    res.json({ transactions, grandTotal });
+  } catch (err) { logger.error(err, { req }); res.status(500).json({ message: err.message }); }
+};
+
+// GET /api/laporan/bpk — Laporan Bukti Pengeluaran Barang
+exports.bpk = async (req, res) => {
+  try {
+    const ctx = getTenantContext();
+    const { tglwal, tglakhir, idlokasi, filters } = req.query;
+    const format = req.query.format || 'json';
+
+    let sql = `
+      SELECT bpk.kodebpk, bpk.tgltrans, bpk.grandtotal, bpk.status,
+        c.kodecustomer, c.namacustomer,
+        l.namalokasi,
+        b.kodebarang, b.namabarang, b.satuankecil AS satuan,
+        bd.jml, bd.harga, bd.subtotal
+      FROM bpk
+        JOIN lokasi l ON l.idlokasi = bpk.idlokasi AND l.idtenant = bpk.idtenant
+        LEFT JOIN customer c ON c.idcustomer = bpk.idcustomer AND c.idtenant = bpk.idtenant
+        JOIN bpkdtl bd ON bd.idbpk = bpk.idbpk AND bd.idtenant = bpk.idtenant
+        JOIN barang b ON b.idbarang = bd.idbarang AND b.idtenant = bpk.idtenant
+      WHERE bpk.idtenant = ?`;
+    const params = [ctx.idtenant];
+    if (idlokasi) { const r = multiIdIn('bpk.idlokasi', idlokasi); if (r.clause) { sql += ' AND ' + r.clause; params.push(...r.params); } }
+    if (tglwal) { sql += ' AND bpk.tgltrans >= ?'; params.push(tglwal); }
+    if (tglakhir) { sql += ' AND bpk.tgltrans <= ?'; params.push(tglakhir); }
+    const af = buildAdvancedFilter(filters);
+    if (af.clause) { sql += ' AND ' + af.clause; params.push(...af.params); }
+    sql += ' ORDER BY bpk.tgltrans DESC, bpk.kodebpk DESC, bd.idbpkdtl ASC';
+
+    const rows = await tenantQuery(sql, params);
+    const transactions = [];
+    let curKode = null, curGroup = null;
+    for (const row of rows) {
+      if (row.kodebpk !== curKode) {
+        curKode = row.kodebpk;
+        curGroup = { kodebpk: row.kodebpk, tgltrans: row.tgltrans, namalokasi: row.namalokasi, kodecustomer: row.kodecustomer, namacustomer: row.namacustomer, grandtotal: parseFloat(row.grandtotal)||0, status: row.status, items: [] };
+        transactions.push(curGroup);
+      }
+      curGroup.items.push({ kodebarang: row.kodebarang, namabarang: row.namabarang, jml: row.jml, satuan: row.satuan, harga: parseFloat(row.harga)||0, subtotal: parseFloat(row.subtotal)||0 });
+    }
+    const grandTotal = transactions.reduce((s, t) => s + t.grandtotal, 0);
+    if (format === 'html') {
+      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      const [[lokasi]] = await pool.query('SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?', [ctx.idlokasi, ctx.idtenant]);
+      return res.render('laporan_bpk', { transactions, grandTotal, tglwal: tglwal||'-', tglakhir: tglakhir||'-', namatoko: tenant?.namatenant||'Grfyn POS', alamat: lokasi?.alamat||'', hp: lokasi?.hp||'', logo: tenant?.logo||'', tglcetak: new Date().toLocaleDateString('id-ID',{year:'numeric',month:'long',day:'numeric'}) });
+    }
+    res.json({ transactions, grandTotal });
+  } catch (err) { logger.error(err, { req }); res.status(500).json({ message: err.message }); }
+};
+
+// GET /api/laporan/retur-jual — Laporan Retur Penjualan
+exports.returJual = async (req, res) => {
+  try {
+    const ctx = getTenantContext();
+    const { tglwal, tglakhir, idlokasi, filters } = req.query;
+    const format = req.query.format || 'json';
+
+    let sql = `
+      SELECT rj.kodereturjual, rj.tgltrans, rj.total, rj.status, rj.kodejual,
+        c.kodecustomer, c.namacustomer,
+        l.namalokasi,
+        b.kodebarang, b.namabarang, b.satuankecil AS satuan,
+        rd.jml, rd.harga, rd.subtotal
+      FROM returjual rj
+        JOIN lokasi l ON l.idlokasi = rj.idlokasi AND l.idtenant = rj.idtenant
+        LEFT JOIN customer c ON c.idcustomer = rj.idcustomer AND c.idtenant = rj.idtenant
+        JOIN returjualdtl rd ON rd.idreturjual = rj.idreturjual AND rd.idtenant = rj.idtenant
+        JOIN barang b ON b.idbarang = rd.idbarang AND b.idtenant = rj.idtenant
+      WHERE rj.idtenant = ?`;
+    const params = [ctx.idtenant];
+    if (idlokasi) { const r = multiIdIn('rj.idlokasi', idlokasi); if (r.clause) { sql += ' AND ' + r.clause; params.push(...r.params); } }
+    if (tglwal) { sql += ' AND rj.tgltrans >= ?'; params.push(tglwal); }
+    if (tglakhir) { sql += ' AND rj.tgltrans <= ?'; params.push(tglakhir); }
+    const af = buildAdvancedFilter(filters);
+    if (af.clause) { sql += ' AND ' + af.clause; params.push(...af.params); }
+    sql += ' ORDER BY rj.tgltrans DESC, rj.kodereturjual DESC, rd.idreturjualdtl ASC';
+
+    const rows = await tenantQuery(sql, params);
+    const transactions = [];
+    let curKode = null, curGroup = null;
+    for (const row of rows) {
+      if (row.kodereturjual !== curKode) {
+        curKode = row.kodereturjual;
+        curGroup = { kodereturjual: row.kodereturjual, tgltrans: row.tgltrans, namalokasi: row.namalokasi, kodecustomer: row.kodecustomer, namacustomer: row.namacustomer, total: parseFloat(row.total)||0, status: row.status, kodejual: row.kodejual, items: [] };
+        transactions.push(curGroup);
+      }
+      curGroup.items.push({ kodebarang: row.kodebarang, namabarang: row.namabarang, jml: row.jml, satuan: row.satuan, harga: parseFloat(row.harga)||0, subtotal: parseFloat(row.subtotal)||0 });
+    }
+    const grandTotal = transactions.reduce((s, t) => s + t.total, 0);
+    if (format === 'html') {
+      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      const [[lokasi]] = await pool.query('SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?', [ctx.idlokasi, ctx.idtenant]);
+      return res.render('laporan_retur_jual', { transactions, grandTotal, tglwal: tglwal||'-', tglakhir: tglakhir||'-', namatoko: tenant?.namatenant||'Grfyn POS', alamat: lokasi?.alamat||'', hp: lokasi?.hp||'', logo: tenant?.logo||'', tglcetak: new Date().toLocaleDateString('id-ID',{year:'numeric',month:'long',day:'numeric'}) });
+    }
+    res.json({ transactions, grandTotal });
+  } catch (err) { logger.error(err, { req }); res.status(500).json({ message: err.message }); }
+};
+
+// GET /api/laporan/purchase-order — Laporan Purchase Order
+exports.purchaseOrder = async (req, res) => {
+  try {
+    const ctx = getTenantContext();
+    const { tglwal, tglakhir, idlokasi, filters } = req.query;
+    const format = req.query.format || 'json';
+
+    let sql = `
+      SELECT po.kodepo, po.tgltrans, po.grandtotal, po.status,
+        s.kodesupplier, s.namasupplier,
+        l.namalokasi,
+        b.kodebarang, b.namabarang, b.satuankecil AS satuan,
+        pd.jml, pd.harga, pd.subtotal
+      FROM purchaseorder po
+        JOIN lokasi l ON l.idlokasi = po.idlokasi AND l.idtenant = po.idtenant
+        LEFT JOIN supplier s ON s.idsupplier = po.idsupplier AND s.idtenant = po.idtenant
+        JOIN purchaseorderdtl pd ON pd.idpo = po.idpo AND pd.idtenant = po.idtenant
+        JOIN barang b ON b.idbarang = pd.idbarang AND b.idtenant = po.idtenant
+      WHERE po.idtenant = ?`;
+    const params = [ctx.idtenant];
+    if (idlokasi) { const r = multiIdIn('po.idlokasi', idlokasi); if (r.clause) { sql += ' AND ' + r.clause; params.push(...r.params); } }
+    if (tglwal) { sql += ' AND po.tgltrans >= ?'; params.push(tglwal); }
+    if (tglakhir) { sql += ' AND po.tgltrans <= ?'; params.push(tglakhir); }
+    const af = buildAdvancedFilter(filters);
+    if (af.clause) { sql += ' AND ' + af.clause; params.push(...af.params); }
+    sql += ' ORDER BY po.tgltrans DESC, po.kodepo DESC, pd.idpodtl ASC';
+
+    const rows = await tenantQuery(sql, params);
+    const transactions = [];
+    let curKode = null, curGroup = null;
+    for (const row of rows) {
+      if (row.kodepo !== curKode) {
+        curKode = row.kodepo;
+        curGroup = { kodepo: row.kodepo, tgltrans: row.tgltrans, namalokasi: row.namalokasi, kodesupplier: row.kodesupplier, namasupplier: row.namasupplier, grandtotal: parseFloat(row.grandtotal)||0, status: row.status, items: [] };
+        transactions.push(curGroup);
+      }
+      curGroup.items.push({ kodebarang: row.kodebarang, namabarang: row.namabarang, jml: row.jml, satuan: row.satuan, harga: parseFloat(row.harga)||0, subtotal: parseFloat(row.subtotal)||0 });
+    }
+    const grandTotal = transactions.reduce((s, t) => s + t.grandtotal, 0);
+    if (format === 'html') {
+      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      const [[lokasi]] = await pool.query('SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?', [ctx.idlokasi, ctx.idtenant]);
+      return res.render('laporan_purchase_order', { transactions, grandTotal, tglwal: tglwal||'-', tglakhir: tglakhir||'-', namatoko: tenant?.namatenant||'Grfyn POS', alamat: lokasi?.alamat||'', hp: lokasi?.hp||'', logo: tenant?.logo||'', tglcetak: new Date().toLocaleDateString('id-ID',{year:'numeric',month:'long',day:'numeric'}) });
+    }
+    res.json({ transactions, grandTotal });
+  } catch (err) { logger.error(err, { req }); res.status(500).json({ message: err.message }); }
+};
+
+// GET /api/laporan/bpb — Laporan Bukti Penerimaan Barang
+exports.bpb = async (req, res) => {
+  try {
+    const ctx = getTenantContext();
+    const { tglwal, tglakhir, idlokasi, filters } = req.query;
+    const format = req.query.format || 'json';
+
+    let sql = `
+      SELECT bpb.kodebpb, bpb.tgltrans, bpb.grandtotal, bpb.status,
+        s.kodesupplier, s.namasupplier,
+        l.namalokasi,
+        b.kodebarang, b.namabarang, b.satuankecil AS satuan,
+        bd.jml, bd.harga, bd.subtotal
+      FROM bpb
+        JOIN lokasi l ON l.idlokasi = bpb.idlokasi AND l.idtenant = bpb.idtenant
+        LEFT JOIN supplier s ON s.idsupplier = bpb.idsupplier AND s.idtenant = bpb.idtenant
+        JOIN bpbdtl bd ON bd.idbpb = bpb.idbpb AND bd.idtenant = bpb.idtenant
+        JOIN barang b ON b.idbarang = bd.idbarang AND b.idtenant = bpb.idtenant
+      WHERE bpb.idtenant = ?`;
+    const params = [ctx.idtenant];
+    if (idlokasi) { const r = multiIdIn('bpb.idlokasi', idlokasi); if (r.clause) { sql += ' AND ' + r.clause; params.push(...r.params); } }
+    if (tglwal) { sql += ' AND bpb.tgltrans >= ?'; params.push(tglwal); }
+    if (tglakhir) { sql += ' AND bpb.tgltrans <= ?'; params.push(tglakhir); }
+    const af = buildAdvancedFilter(filters);
+    if (af.clause) { sql += ' AND ' + af.clause; params.push(...af.params); }
+    sql += ' ORDER BY bpb.tgltrans DESC, bpb.kodebpb DESC, bd.idbpbdtl ASC';
+
+    const rows = await tenantQuery(sql, params);
+    const transactions = [];
+    let curKode = null, curGroup = null;
+    for (const row of rows) {
+      if (row.kodebpb !== curKode) {
+        curKode = row.kodebpb;
+        curGroup = { kodebpb: row.kodebpb, tgltrans: row.tgltrans, namalokasi: row.namalokasi, kodesupplier: row.kodesupplier, namasupplier: row.namasupplier, grandtotal: parseFloat(row.grandtotal)||0, status: row.status, items: [] };
+        transactions.push(curGroup);
+      }
+      curGroup.items.push({ kodebarang: row.kodebarang, namabarang: row.namabarang, jml: row.jml, satuan: row.satuan, harga: parseFloat(row.harga)||0, subtotal: parseFloat(row.subtotal)||0 });
+    }
+    const grandTotal = transactions.reduce((s, t) => s + t.grandtotal, 0);
+    if (format === 'html') {
+      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      const [[lokasi]] = await pool.query('SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?', [ctx.idlokasi, ctx.idtenant]);
+      return res.render('laporan_bpb', { transactions, grandTotal, tglwal: tglwal||'-', tglakhir: tglakhir||'-', namatoko: tenant?.namatenant||'Grfyn POS', alamat: lokasi?.alamat||'', hp: lokasi?.hp||'', logo: tenant?.logo||'', tglcetak: new Date().toLocaleDateString('id-ID',{year:'numeric',month:'long',day:'numeric'}) });
+    }
+    res.json({ transactions, grandTotal });
+  } catch (err) { logger.error(err, { req }); res.status(500).json({ message: err.message }); }
+};
+
+// GET /api/laporan/retur-beli — Laporan Retur Pembelian
+exports.returBeli = async (req, res) => {
+  try {
+    const ctx = getTenantContext();
+    const { tglwal, tglakhir, idlokasi, filters } = req.query;
+    const format = req.query.format || 'json';
+
+    let sql = `
+      SELECT rb.kodereturbeli, rb.tgltrans, rb.total, rb.status, rb.kodebeli,
+        s.kodesupplier, s.namasupplier,
+        l.namalokasi,
+        b.kodebarang, b.namabarang, b.satuankecil AS satuan,
+        rd.jml, rd.harga, rd.subtotal
+      FROM returbeli rb
+        JOIN lokasi l ON l.idlokasi = rb.idlokasi AND l.idtenant = rb.idtenant
+        LEFT JOIN supplier s ON s.idsupplier = rb.idsupplier AND s.idtenant = rb.idtenant
+        JOIN returbelidtl rd ON rd.idreturbeli = rb.idreturbeli AND rd.idtenant = rb.idtenant
+        JOIN barang b ON b.idbarang = rd.idbarang AND b.idtenant = rb.idtenant
+      WHERE rb.idtenant = ?`;
+    const params = [ctx.idtenant];
+    if (idlokasi) { const r = multiIdIn('rb.idlokasi', idlokasi); if (r.clause) { sql += ' AND ' + r.clause; params.push(...r.params); } }
+    if (tglwal) { sql += ' AND rb.tgltrans >= ?'; params.push(tglwal); }
+    if (tglakhir) { sql += ' AND rb.tgltrans <= ?'; params.push(tglakhir); }
+    const af = buildAdvancedFilter(filters);
+    if (af.clause) { sql += ' AND ' + af.clause; params.push(...af.params); }
+    sql += ' ORDER BY rb.tgltrans DESC, rb.kodereturbeli DESC, rd.idreturbelidtl ASC';
+
+    const rows = await tenantQuery(sql, params);
+    const transactions = [];
+    let curKode = null, curGroup = null;
+    for (const row of rows) {
+      if (row.kodereturbeli !== curKode) {
+        curKode = row.kodereturbeli;
+        curGroup = { kodereturbeli: row.kodereturbeli, tgltrans: row.tgltrans, namalokasi: row.namalokasi, kodesupplier: row.kodesupplier, namasupplier: row.namasupplier, total: parseFloat(row.total)||0, status: row.status, kodebeli: row.kodebeli, items: [] };
+        transactions.push(curGroup);
+      }
+      curGroup.items.push({ kodebarang: row.kodebarang, namabarang: row.namabarang, jml: row.jml, satuan: row.satuan, harga: parseFloat(row.harga)||0, subtotal: parseFloat(row.subtotal)||0 });
+    }
+    const grandTotal = transactions.reduce((s, t) => s + t.total, 0);
+    if (format === 'html') {
+      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      const [[lokasi]] = await pool.query('SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?', [ctx.idlokasi, ctx.idtenant]);
+      return res.render('laporan_retur_beli', { transactions, grandTotal, tglwal: tglwal||'-', tglakhir: tglakhir||'-', namatoko: tenant?.namatenant||'Grfyn POS', alamat: lokasi?.alamat||'', hp: lokasi?.hp||'', logo: tenant?.logo||'', tglcetak: new Date().toLocaleDateString('id-ID',{year:'numeric',month:'long',day:'numeric'}) });
+    }
+    res.json({ transactions, grandTotal });
+  } catch (err) { logger.error(err, { req }); res.status(500).json({ message: err.message }); }
 };
 
 // GET /api/laporan/faktur/:id — Cetak faktur penjualan (HTML)
