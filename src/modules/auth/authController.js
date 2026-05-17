@@ -142,6 +142,24 @@ exports.login = async (req, res) => {
       return res.status(403).json({ message: 'User tidak memiliki hak akses POS' });
     }
 
+    // Jika user punya lebih dari 1 lokasi, minta pilih lokasi dulu
+    if (lokasi.length > 1) {
+      return res.json({
+        needSelectLocation: true,
+        locations: lokasi.map((l) => ({
+          idlokasi  : l.idlokasi,
+          kodelokasi: l.kodelokasi,
+          namalokasi: upperOrEmpty(l.namalokasi),
+          alamat    : l.alamat,
+        })),
+        user: {
+          iduser  : user.iduser,
+          username: user.username,
+          namauser: user.namauser,
+        },
+      });
+    }
+
     const loc = lokasi.find(l => Number(l.isdefault) === 1) || lokasi[0];
     const token = signLoginToken(user, loc);
 
