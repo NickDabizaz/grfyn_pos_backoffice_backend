@@ -6,9 +6,28 @@ const { pool, getTenantContext } = require('../../config/db');
 const logger = require('../../lib/logger');
 const { hasAnyAccess, normalizeAccess } = require('../../lib/access');
 
+async function ensureStockReportMenus() {
+  const [[parent]] = await pool.query("SELECT idmenu FROM menu WHERE kodemenu = 'laporan.stok' LIMIT 1");
+  if (!parent) return;
+  const rows = [
+    ['laporan.stok.opname', 'Opname Stok', 3],
+    ['laporan.stok.transfer', 'Transfer Stok', 4],
+  ];
+  for (const [kodemenu, namamenu, urutan] of rows) {
+    const [[exists]] = await pool.query('SELECT idmenu FROM menu WHERE kodemenu = ? LIMIT 1', [kodemenu]);
+    if (exists) continue;
+    const [[maxRow]] = await pool.query('SELECT COALESCE(MAX(idmenu), 0) + 1 AS nextId FROM menu');
+    await pool.query(
+      'INSERT INTO menu (idmenu, idparent, kodemenu, namamenu, urutan, icon, path) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [maxRow.nextId, parent.idmenu, kodemenu, namamenu, urutan, null, null]
+    );
+  }
+}
+
 // GET /api/menu/all — Mengambil semua menu (untuk user management)
 exports.getAll = async (req, res) => {
   try {
+    await ensureStockReportMenus();
     const [menus] = await pool.query(
       "SELECT * FROM menu WHERE kodemenu <> 'pos.shift' ORDER BY urutan ASC"
     );
@@ -33,6 +52,7 @@ exports.myMenu = async (req, res) => {
   try {
     const ctx = getTenantContext();
     const iduser = ctx.iduser;
+    await ensureStockReportMenus();
 
     const [[user]] = await pool.query(
       'SELECT isowner FROM user WHERE iduser = ? AND idtenant = ?',

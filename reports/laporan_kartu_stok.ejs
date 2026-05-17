@@ -94,7 +94,7 @@
             <tr>
               <td class="center"><%= i++ %></td>
               <td class="center"><%= formatTanggal(row.tgltrans) %></td>
-              <td><%= namalokasi || '-' %></td>
+              <td><%= row.namalokasi || namalokasi || '-' %></td>
               <td class="right"><%= row.jenis === 'M' ? formatQty(row.jml) : '-' %></td>
               <td class="right"><%= row.jenis === 'K' ? formatQty(row.jml) : '-' %></td>
               <td class="right"><%= formatQty(saldo) %></td>

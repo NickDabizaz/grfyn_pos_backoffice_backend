@@ -19,6 +19,21 @@ function getLastDay(periodbulan) {
   return `${y}-${String(m).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function todayLocal() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function statusFilter(alias = 'h') {
+  return `${alias}.status IN ('APPROVED', 'AKTIF')`;
+}
+
+function normalizeHppStatus(status) {
+  if (status === 'AKTIF') return 'APPROVED';
+  if (status === 'VOID') return 'CANCELED';
+  return status;
+}
+
 // Mendapatkan periode bulan sebelumnya dari string YYYY-MM
 function getPrevMonth(periodbulan) {
   const [y, m] = periodbulan.split('-').map(Number);
@@ -38,7 +53,7 @@ function getNextMonth(periodbulan) {
 async function getStokAt(conn, ctx, idbarang, beforeDate) {
   // Cari saldo stok snapshot terbaru sebelum atau pada beforeDate
   let sql1 = `SELECT ss.idsaldostok, ss.tgltrans FROM saldostok ss
-     WHERE ss.idtenant = ? AND ss.idlokasi = ? AND ss.tgltrans <= ?
+     WHERE ss.idtenant = ? AND ss.idlokasi = ? AND ss.status IN ('APPROVED', 'AKTIF') AND ss.tgltrans <= ?
      ORDER BY ss.tgltrans DESC LIMIT 1`;
   const [[latestSaldo]] = await conn.query(sql1, [ctx.idtenant, ctx.idlokasi, beforeDate]);
 
@@ -85,7 +100,7 @@ async function calcHPPItem(conn, ctx, idbarang, periodbulan, tglawal, tglakhir) 
   let sql1 = `SELECT hd.saldoakhir_qty, hd.saldoakhir_nilai
      FROM hitunghpp h JOIN hitunghppdtl hd ON h.idhitunghpp = hd.idhitunghpp
      WHERE h.idtenant = ? AND h.idlokasi = ? AND h.periodbulan = ?
-       AND h.status = 'AKTIF' AND hd.idbarang = ?`;
+       AND ${statusFilter('h')} AND hd.idbarang = ?`;
   const [[prevHPP]] = await conn.query(sql1,
     [ctx.idtenant, ctx.idlokasi, prevMonth, idbarang]
   );
@@ -115,7 +130,7 @@ async function calcHPPItem(conn, ctx, idbarang, periodbulan, tglawal, tglakhir) 
             COALESCE(SUM(bd.jml * bd.harga), 0) as nilai
      FROM belidtl bd JOIN beli b ON bd.idbeli = b.idbeli
      WHERE b.idtenant = ? AND b.idlokasi = ?
-       AND b.status = 'AKTIF'
+       AND b.status IN ('APPROVED', 'AKTIF')
        AND b.tgltrans BETWEEN ? AND ?
        AND bd.idbarang = ?`;
   const [[pem]] = await conn.query(sql3,
@@ -126,21 +141,21 @@ async function calcHPPItem(conn, ctx, idbarang, periodbulan, tglawal, tglakhir) 
   let sql4 = `SELECT COALESCE(SUM(jd.jml), 0) as qty
      FROM jualdtl jd JOIN jual j ON jd.idjual = j.idjual
      WHERE j.idtenant = ? AND j.idlokasi = ?
-       AND j.status = 'AKTIF'
+       AND j.status IN ('APPROVED', 'AKTIF')
        AND j.tgltrans BETWEEN ? AND ?
        AND jd.idbarang = ?`;
   const [[jl]] = await conn.query(sql4,
     [ctx.idtenant, ctx.idlokasi, tglawal, tglakhir, idbarang]
   );
 
-  // Hitung penyesuaian stok (masuk - keluar) dari kartustok dengan jenistransaksi 'PENYESUAIANSTOK'
+  // Hitung mutasi stok lain (opname, transfer, penyesuaian, retur, produksi) yang memengaruhi saldo lokasi.
   let sql5 = `SELECT
        COALESCE(SUM(CASE WHEN jenis='M' THEN jml ELSE 0 END), 0) -
        COALESCE(SUM(CASE WHEN jenis='K' THEN jml ELSE 0 END), 0) as qty_net
      FROM kartustok
      WHERE idtenant = ? AND idlokasi = ?
        AND idbarang = ?
-       AND jenistransaksi = 'PENYESUAIANSTOK'
+       AND COALESCE(jenistransaksi, '') NOT IN ('BELI', 'JUAL', 'SALDOSTOK')
        AND tgltrans BETWEEN ? AND ?`;
   const [[adj]] = await conn.query(sql5,
     [ctx.idtenant, ctx.idlokasi, idbarang, tglawal, tglakhir]
@@ -188,13 +203,17 @@ exports.getAll = async (req, res) => {
       WHERE h.idlokasi = ?`;
     const params = [ctx.idlokasi];
 
-    if (status) { sql += ' AND h.status = ?'; params.push(status); }
+    if (status) {
+      const vals = status === 'APPROVED' ? ['APPROVED', 'AKTIF'] : status === 'CANCELED' ? ['CANCELED', 'CANCELLED', 'VOID'] : [status];
+      sql += ` AND h.status IN (${vals.map(() => '?').join(',')})`;
+      params.push(...vals);
+    }
     if (tahun) { sql += ' AND h.periodbulan LIKE ?'; params.push(`${tahun}-%`); }
 
     sql += ' ORDER BY h.periodbulan DESC, h.idhitunghpp DESC';
 
     const rows = await tenantQuery(sql, params);
-    res.json(rows);
+    res.json(rows.map(row => ({ ...row, status: normalizeHppStatus(row.status) })));
   } catch (err) {
     logger.error(err, { req });
     res.status(500).json({ message: err.message });
@@ -223,7 +242,7 @@ exports.getOne = async (req, res) => {
       [req.params.id]
     );
 
-    res.json({ ...rows[0], items });
+    res.json({ ...rows[0], status: normalizeHppStatus(rows[0].status), items });
   } catch (err) {
     logger.error(err, { req });
     res.status(500).json({ message: err.message });
@@ -245,7 +264,7 @@ exports.checkPeriod = async (req, res) => {
 
     const tglawal = getFirstDay(periodbulan);
     const tglakhir = getLastDay(periodbulan);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayLocal();
 
     // Cek periode masa depan
     if (tglakhir > today) {
@@ -253,7 +272,7 @@ exports.checkPeriod = async (req, res) => {
     }
 
     // Cek apakah periode sudah pernah diposting
-    let sql1 = "SELECT * FROM hitunghpp WHERE idtenant = ? AND idlokasi = ? AND periodbulan = ? AND status = 'AKTIF'";
+    let sql1 = `SELECT * FROM hitunghpp WHERE idtenant = ? AND idlokasi = ? AND periodbulan = ? AND ${statusFilter('hitunghpp')}`;
     const [[existing]] = await conn.query(sql1,
       [ctx.idtenant, ctx.idlokasi, periodbulan]
     );
@@ -262,7 +281,7 @@ exports.checkPeriod = async (req, res) => {
     }
 
     // Cek apakah ada periode lebih baru yang sudah diposting (harus cancel dari yang terbaru dulu)
-    let sql2 = "SELECT periodbulan FROM hitunghpp WHERE idtenant = ? AND idlokasi = ? AND periodbulan > ? AND status = 'AKTIF' ORDER BY periodbulan ASC LIMIT 1";
+    let sql2 = `SELECT periodbulan FROM hitunghpp WHERE idtenant = ? AND idlokasi = ? AND periodbulan > ? AND ${statusFilter('hitunghpp')} ORDER BY periodbulan ASC LIMIT 1`;
     const [[newerPeriod]] = await conn.query(sql2,
       [ctx.idtenant, ctx.idlokasi, periodbulan]
     );
@@ -270,7 +289,7 @@ exports.checkPeriod = async (req, res) => {
       return res.json({ valid: false, reason: 'NOT_LATEST_PERIOD', message: `Sudah ada periode lebih baru yang dihitung: ${newerPeriod.periodbulan}` });
     }
 
-    let sql3 = "SELECT periodbulan FROM hitunghpp WHERE idtenant = ? AND idlokasi = ? AND periodbulan < ? AND status = 'AKTIF' ORDER BY periodbulan DESC LIMIT 1";
+    let sql3 = `SELECT periodbulan FROM hitunghpp WHERE idtenant = ? AND idlokasi = ? AND periodbulan < ? AND ${statusFilter('hitunghpp')} ORDER BY periodbulan DESC LIMIT 1`;
     const [[anyPrevious]] = await conn.query(sql3,
       [ctx.idtenant, ctx.idlokasi, periodbulan]
     );
@@ -278,7 +297,7 @@ exports.checkPeriod = async (req, res) => {
     // Cek apakah bulan sebelumnya sudah diposting (harus berurutan)
     if (anyPrevious) {
       const prevMonth = getPrevMonth(periodbulan);
-      let sql4 = "SELECT idhitunghpp FROM hitunghpp WHERE idtenant = ? AND idlokasi = ? AND periodbulan = ? AND status = 'AKTIF'";
+      let sql4 = `SELECT idhitunghpp FROM hitunghpp WHERE idtenant = ? AND idlokasi = ? AND periodbulan = ? AND ${statusFilter('hitunghpp')}`;
       const [[prevPosted]] = await conn.query(sql4,
         [ctx.idtenant, ctx.idlokasi, prevMonth]
       );
@@ -359,7 +378,7 @@ exports.create = async (req, res) => {
 
     const tglawal = getFirstDay(periodbulan);
     const tglakhir = getLastDay(periodbulan);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayLocal();
 
     if (!/^\d{4}-\d{2}$/.test(periodbulan)) {
       return res.status(400).json({ message: 'Format periodbulan harus YYYY-MM' });
@@ -371,7 +390,7 @@ exports.create = async (req, res) => {
     await conn.beginTransaction();
 
     // Cek apakah periode sudah diposting (pakai FOR UPDATE untuk lock row)
-    let sql1 = "SELECT * FROM hitunghpp WHERE idtenant = ? AND idlokasi = ? AND periodbulan = ? AND status = 'AKTIF' FOR UPDATE";
+    let sql1 = `SELECT * FROM hitunghpp WHERE idtenant = ? AND idlokasi = ? AND periodbulan = ? AND ${statusFilter('hitunghpp')} FOR UPDATE`;
     const [[existing]] = await conn.query(sql1,
       [ctx.idtenant, ctx.idlokasi, periodbulan]
     );
@@ -380,7 +399,7 @@ exports.create = async (req, res) => {
       return res.status(400).json({ message: `Periode ${periodbulan} sudah dihitung. Cancel dulu jika mau hitung ulang.` });
     }
 
-    let sql2 = "SELECT periodbulan FROM hitunghpp WHERE idtenant = ? AND idlokasi = ? AND periodbulan > ? AND status = 'AKTIF' ORDER BY periodbulan ASC LIMIT 1";
+    let sql2 = `SELECT periodbulan FROM hitunghpp WHERE idtenant = ? AND idlokasi = ? AND periodbulan > ? AND ${statusFilter('hitunghpp')} ORDER BY periodbulan ASC LIMIT 1`;
     const [[newerPeriod]] = await conn.query(sql2,
       [ctx.idtenant, ctx.idlokasi, periodbulan]
     );
@@ -389,14 +408,14 @@ exports.create = async (req, res) => {
       return res.status(400).json({ message: `Sudah ada periode lebih baru: ${newerPeriod.periodbulan}` });
     }
 
-    let sql3 = "SELECT periodbulan FROM hitunghpp WHERE idtenant = ? AND idlokasi = ? AND periodbulan < ? AND status = 'AKTIF' ORDER BY periodbulan DESC LIMIT 1";
+    let sql3 = `SELECT periodbulan FROM hitunghpp WHERE idtenant = ? AND idlokasi = ? AND periodbulan < ? AND ${statusFilter('hitunghpp')} ORDER BY periodbulan DESC LIMIT 1`;
     const [[anyPrevious]] = await conn.query(sql3,
       [ctx.idtenant, ctx.idlokasi, periodbulan]
     );
 
     if (anyPrevious) {
       const prevMonth = getPrevMonth(periodbulan);
-      let sql4 = "SELECT idhitunghpp FROM hitunghpp WHERE idtenant = ? AND idlokasi = ? AND periodbulan = ? AND status = 'AKTIF'";
+      let sql4 = `SELECT idhitunghpp FROM hitunghpp WHERE idtenant = ? AND idlokasi = ? AND periodbulan = ? AND ${statusFilter('hitunghpp')}`;
       const [[prevPosted]] = await conn.query(sql4,
         [ctx.idtenant, ctx.idlokasi, prevMonth]
       );
@@ -423,7 +442,7 @@ exports.create = async (req, res) => {
     const kodehitunghpp = await generateKodeHitungHPP(conn, ctx.idtenant, ctx.idlokasi, periodbulan);
 
     let sql7 = `INSERT INTO hitunghpp (idtenant, idlokasi, kodehitunghpp, periodbulan, tglawal, tglakhir, iduser, catatan, status, userentry)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'AKTIF', ?)`;
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'APPROVED', ?)`;
     const [result] = await conn.query(sql7,
       [ctx.idtenant, ctx.idlokasi, kodehitunghpp, periodbulan, tglawal, tglakhir, ctx.iduser, catatan || null, ctx.iduser]
     );
@@ -519,19 +538,19 @@ exports.cancel = async (req, res) => {
       await conn.rollback();
       return res.status(404).json({ message: 'Data HPP tidak ditemukan' });
     }
-    if (record.status !== 'AKTIF') {
+    if (!['APPROVED', 'AKTIF'].includes(record.status)) {
       await conn.rollback();
       return res.status(400).json({ message: 'HPP sudah dibatalkan' });
     }
 
     // Cek tidak boleh cancel jika ada periode lebih baru yang masih AKTIF
-    let sql2 = "SELECT periodbulan FROM hitunghpp WHERE idtenant = ? AND idlokasi = ? AND periodbulan > ? AND status = 'AKTIF' ORDER BY periodbulan ASC";
+    let sql2 = `SELECT periodbulan FROM hitunghpp WHERE idtenant = ? AND idlokasi = ? AND periodbulan > ? AND ${statusFilter('hitunghpp')} ORDER BY periodbulan ASC`;
     const [[newerPosting]] = await conn.query(sql2,
       [ctx.idtenant, ctx.idlokasi, record.periodbulan]
     );
     if (newerPosting) {
       await conn.rollback();
-      let sql3 = "SELECT periodbulan FROM hitunghpp WHERE idtenant = ? AND idlokasi = ? AND periodbulan > ? AND status = 'AKTIF' ORDER BY periodbulan ASC";
+      let sql3 = `SELECT periodbulan FROM hitunghpp WHERE idtenant = ? AND idlokasi = ? AND periodbulan > ? AND ${statusFilter('hitunghpp')} ORDER BY periodbulan ASC`;
       const list = await conn.query(sql3,
         [ctx.idtenant, ctx.idlokasi, record.periodbulan]
       );
@@ -539,8 +558,8 @@ exports.cancel = async (req, res) => {
       return res.status(400).json({ message: `Tidak bisa cancel bulan tengah. Cancel dulu periode setelahnya: ${periods}` });
     }
 
-    // Update status HPP ke VOID dan jurnal ke NONAKTIF
-    let sql4 = "UPDATE hitunghpp SET status = 'VOID' WHERE idhitunghpp = ?";
+    // Update status HPP ke CANCELED dan jurnal ke NONAKTIF
+    let sql4 = "UPDATE hitunghpp SET status = 'CANCELED' WHERE idhitunghpp = ?";
     await conn.query(sql4, [id]);
 
     let sql5 = "UPDATE jurnal SET status = 'NONAKTIF' WHERE jenis = 'hpp' AND idtrans = ? AND idtenant = ? AND idlokasi = ?";

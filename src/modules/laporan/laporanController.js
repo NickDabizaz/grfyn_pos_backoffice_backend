@@ -11,8 +11,8 @@ const logger = require('../../lib/logger');
 exports.getJenisTransaksiKartuStok = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const sql = `SELECT DISTINCT jenistransaksi FROM kartustok WHERE idtenant = ? AND idlokasi = ? AND jenistransaksi IS NOT NULL AND jenistransaksi != '' ORDER BY jenistransaksi`;
-    const rows = await tenantQuery(sql, [ctx.idtenant, ctx.idlokasi]);
+    const sql = `SELECT DISTINCT jenistransaksi FROM kartustok WHERE idtenant = ? AND jenistransaksi IS NOT NULL AND jenistransaksi != '' ORDER BY jenistransaksi`;
+    const rows = await tenantQuery(sql, [ctx.idtenant]);
     res.json(rows.map(r => r.jenistransaksi));
   } catch (err) {
     logger.error(err, { req });
@@ -1098,7 +1098,7 @@ exports.stok = async (req, res) => {
     const format = req.query.format || 'json';
 
     // Cari saldo stok snapshot terbaru
-    let sqlSaldo = 'SELECT idsaldostok, kodesaldostok, tgltrans FROM saldostok WHERE idtenant = ? AND idlokasi = ? ORDER BY tgltrans DESC, idsaldostok DESC LIMIT 1';
+    let sqlSaldo = "SELECT idsaldostok, kodesaldostok, tgltrans FROM saldostok WHERE idtenant = ? AND idlokasi = ? AND status IN ('APPROVED', 'AKTIF') ORDER BY tgltrans DESC, idsaldostok DESC LIMIT 1";
     const [[latestSaldo]] = await pool.query(
       sqlSaldo,
       [ctx.idtenant, ctx.idlokasi]
@@ -1159,17 +1159,22 @@ exports.stok = async (req, res) => {
 exports.kartuStok = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const { idbarang, tglwal, tglakhir, jenistransaksi, jenisref } = req.query;
+    const { idbarang, tglwal, tglakhir, jenistransaksi, jenisref, idlokasi } = req.query;
     const format = req.query.format || 'json';
     const selectedBarangFilter = idbarang ? multiIdIn('ks.idbarang', idbarang) : null;
+    const selectedLokasiFilter = idlokasi ? multiIdIn('ks.idlokasi', idlokasi) : null;
 
-    let sql = `SELECT ks.*, b.kodebarang, b.namabarang, b.satuankecil as satuan
+    let sql = `SELECT ks.*, b.kodebarang, b.namabarang, b.satuankecil as satuan, l.namalokasi
       FROM kartustok ks
       LEFT JOIN barang b ON ks.idbarang = b.idbarang AND b.idtenant = ks.idtenant
+      LEFT JOIN lokasi l ON l.idlokasi = ks.idlokasi AND l.idtenant = ks.idtenant
       WHERE 1=1`;
     const params = [];
     sql += ' AND ks.idtenant = ?'; params.push(ctx.idtenant);
-    sql += ' AND ks.idlokasi = ?'; params.push(ctx.idlokasi);
+    if (selectedLokasiFilter?.clause) {
+      sql += ` AND ${selectedLokasiFilter.clause}`;
+      params.push(...selectedLokasiFilter.params);
+    }
     if (selectedBarangFilter?.clause) {
       sql += ` AND ${selectedBarangFilter.clause}`;
       params.push(...selectedBarangFilter.params);
@@ -1192,18 +1197,21 @@ exports.kartuStok = async (req, res) => {
     let latestSaldo = null;
     let saldoAwalByBarang = {};
     let barangById = {};
-    const [[lokasi]] = await pool.query(
-      'SELECT namalokasi FROM lokasi WHERE idlokasi = ? AND idtenant = ?',
-      [ctx.idlokasi, ctx.idtenant]
+    const lokasiFilterIds = idlokasi ? idlokasi.split(',').map(s => s.trim()).filter(Boolean) : [];
+    const lokasiWhere = lokasiFilterIds.length ? ` AND idlokasi IN (${lokasiFilterIds.map(() => '?').join(',')})` : '';
+    const [lokasiRows] = await pool.query(
+      `SELECT idlokasi, namalokasi FROM lokasi WHERE idtenant = ?${lokasiWhere} ORDER BY namalokasi`,
+      [ctx.idtenant, ...lokasiFilterIds]
     );
+    const namalokasiReport = lokasiRows.map(l => l.namalokasi).join(', ') || '-';
 
     const [[latestSaldoRow]] = await pool.query(
       `SELECT idsaldostok, tgltrans
        FROM saldostok
-       WHERE idtenant = ? AND idlokasi = ?
+       WHERE idtenant = ?${lokasiWhere} AND status IN ('APPROVED', 'AKTIF')
        ORDER BY tgltrans DESC, idsaldostok DESC
        LIMIT 1`,
-      [ctx.idtenant, ctx.idlokasi]
+      [ctx.idtenant, ...lokasiFilterIds]
     );
     latestSaldo = latestSaldoRow || null;
 
@@ -1270,7 +1278,7 @@ exports.kartuStok = async (req, res) => {
         data: rows,
         groupedData,
         periodSaldo: latestSaldo ? latestSaldo.tgltrans : '-',
-        namalokasi: lokasi?.namalokasi || '-',
+        namalokasi: namalokasiReport,
         tglwal: tglwal || '-', tglakhir: tglakhir || '-',
         namatoko: tenant?.namatenant || 'Grfyn POS',
         alamat: '', hp: '', logo: tenant?.logo || '',
@@ -1278,7 +1286,162 @@ exports.kartuStok = async (req, res) => {
       });
     }
 
-    res.json({ data: rows, groupedData, periodSaldo: latestSaldo?.tgltrans || null, namalokasi: lokasi?.namalokasi || '-' });
+    res.json({ data: rows, groupedData, periodSaldo: latestSaldo?.tgltrans || null, namalokasi: namalokasiReport });
+  } catch (err) {
+    logger.error(err, { req });
+    res.status(500).json({ message: err.message });
+  }
+};
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+function sendSimpleStokReport(res, title, rows, meta) {
+  const grouped = [];
+  const map = new Map();
+  for (const row of rows) {
+    const key = row.kode || '-';
+    if (!map.has(key)) {
+      const trx = {
+        kode: row.kode,
+        tgltrans: row.tgltrans,
+        lokasi: row.lokasi,
+        lokasi_tujuan: row.lokasi_tujuan,
+        status: row.status,
+        items: [],
+      };
+      map.set(key, trx);
+      grouped.push(trx);
+    }
+    map.get(key).items.push(row);
+  }
+
+  let no = 0;
+  const bodyRows = grouped.map((trx) => {
+    no += 1;
+    const rowspan = Math.max(trx.items.length, 1);
+    return trx.items.map((item, idx) => `
+      <tr>
+        ${idx === 0 ? `<td class="center rs" rowspan="${rowspan}">${no}</td>
+        <td class="rs" rowspan="${rowspan}">${escapeHtml(trx.kode || '')}</td>
+        <td class="center rs" rowspan="${rowspan}">${escapeHtml(String(trx.tgltrans || '').slice(0, 10))}</td>
+        <td class="rs" rowspan="${rowspan}">${escapeHtml(trx.lokasi || '-')}</td>
+        ${meta.showTujuan ? `<td class="rs" rowspan="${rowspan}">${escapeHtml(trx.lokasi_tujuan || '-')}</td>` : ''}
+        <td class="center rs" rowspan="${rowspan}"><span class="status-badge ${trx.status === 'APPROVED' ? 'approved' : trx.status === 'CANCELLED' ? 'cancelled' : 'draft'}">${escapeHtml(trx.status || '')}</span></td>` : ''}
+        <td class="center item">${escapeHtml(item.kodebarang || '')}</td>
+        <td class="item">${escapeHtml(item.namabarang || '')}</td>
+        <td class="right item">${Number(item.jml || 0).toLocaleString('id-ID')}</td>
+        <td class="center item">${escapeHtml(item.satuan || '')}</td>
+      </tr>`).join('');
+  }).join('');
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
+    <link rel="stylesheet" href="/reports/laporan_style.css">
+    <style>
+      @media print { .no-print { display:none; } }
+      td.rs{vertical-align:top;border-right:1px solid #D7CAC1}
+      td.item{border-left:1px solid #D7CAC1}
+      table{width:100%;border-collapse:collapse}
+      th,td{border:1px solid #D7CAC1;padding:8px;font-size:11px}
+      .right{text-align:right}.center{text-align:center}
+      .status-badge{display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700}
+      .status-badge.approved{background:#DCFCE7;color:#166534}
+      .status-badge.draft{background:#FAF2E0;color:#A07D30}
+      .status-badge.cancelled{background:#FEE2E2;color:#991B1B}
+    </style></head><body>
+    <div class="no-print" style="text-align:right;margin-bottom:10px;">
+      <button onclick="window.print()" style="padding:8px 16px;background:#C4683D;color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;font-weight:600;">Cetak</button>
+    </div>
+    <div class="report-header">
+      ${meta.logo ? `<img class="logo" src="${escapeHtml(meta.logo)}" alt="Logo">` : ''}
+      <h2>${escapeHtml(meta.namatoko || 'Grfyn POS')}</h2>
+      <p class="subtitle">${escapeHtml(meta.alamat || '')} ${meta.hp ? `| ${escapeHtml(meta.hp)}` : ''}</p>
+      <h3>${escapeHtml(title.toUpperCase())}</h3>
+    </div>
+    <div class="report-meta">
+      <span>Periode: <span class="periode">${escapeHtml(meta.tglwal || '-')} s/d ${escapeHtml(meta.tglakhir || '-')}</span></span>
+      <span>Tanggal Cetak: ${escapeHtml(meta.tglcetak || '')}</span>
+    </div>
+    <table><thead><tr>
+      <th class="center">No</th><th>Kode</th><th class="center">Tanggal</th><th>Lokasi</th>${meta.showTujuan ? '<th>Lokasi Tujuan</th>' : ''}
+      <th class="center">Status</th><th>Kode Barang</th><th>Nama Barang</th><th class="right">Jumlah</th><th class="center">Satuan</th>
+    </tr></thead><tbody>${bodyRows || `<tr><td colspan="${meta.showTujuan ? 10 : 9}" class="center">Tidak ada data</td></tr>`}</tbody>
+    <tfoot><tr><td colspan="${meta.showTujuan ? 10 : 9}">TOTAL (${grouped.length} Transaksi)</td></tr></tfoot></table>
+    <div class="report-footer"><p>&copy; ${escapeHtml(meta.namatoko || 'Grfyn POS')} - Generated by Grfyn POS</p></div>
+    </body></html>`);
+}
+
+// GET /api/laporan/stock-opname — Laporan transaksi Opname Stok
+exports.stockOpname = async (req, res) => {
+  try {
+    const ctx = getTenantContext();
+    const { tglwal, tglakhir, idlokasi, idbarang } = req.query;
+    const format = req.query.format || 'json';
+    let sql = `SELECT so.tgltrans, so.kodestockopname AS kode, so.status, l.namalokasi AS lokasi,
+        b.kodebarang, b.namabarang, b.satuankecil AS satuan, sod.stok_fisik AS jml
+      FROM stockopname so
+      JOIN stockopnamedtl sod ON sod.idstockopname = so.idstockopname AND sod.idtenant = so.idtenant
+      JOIN barang b ON b.idbarang = sod.idbarang AND b.idtenant = so.idtenant
+      JOIN lokasi l ON l.idlokasi = so.idlokasi AND l.idtenant = so.idtenant
+      WHERE so.idtenant = ?`;
+    const params = [ctx.idtenant];
+    if (tglwal) { sql += ' AND so.tgltrans >= ?'; params.push(tglwal); }
+    if (tglakhir) { sql += ' AND so.tgltrans <= ?'; params.push(tglakhir); }
+    if (idlokasi) { const r = multiIdIn('so.idlokasi', idlokasi); if (r.clause) { sql += ' AND ' + r.clause; params.push(...r.params); } }
+    if (idbarang) { const r = multiIdIn('sod.idbarang', idbarang); if (r.clause) { sql += ' AND ' + r.clause; params.push(...r.params); } }
+    sql += ' ORDER BY so.tgltrans DESC, so.kodestockopname DESC, b.namabarang ASC';
+    const rows = await tenantQuery(sql, params);
+    const mapped = rows.map(r => ({ ...r, status: r.status === 'FINALIZED' || r.status === 'AKTIF' ? 'APPROVED' : r.status }));
+    if (format === 'html') {
+      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      return sendSimpleStokReport(res, 'Laporan Opname Stok', mapped, {
+        tglwal, tglakhir, showTujuan: false,
+        namatoko: tenant?.namatenant || 'Grfyn POS',
+        alamat: '', hp: '', logo: tenant?.logo || '',
+        tglcetak: new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' })
+      });
+    }
+    res.json({ data: mapped });
+  } catch (err) {
+    logger.error(err, { req });
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// GET /api/laporan/transfer-stok — Laporan transaksi Transfer Stok
+exports.transferStok = async (req, res) => {
+  try {
+    const ctx = getTenantContext();
+    const { tglwal, tglakhir, idlokasi, idlokasitujuan, idbarang } = req.query;
+    const format = req.query.format || 'json';
+    let sql = `SELECT ts.tgltrans, ts.kodetransferstok AS kode, ts.status,
+        l1.namalokasi AS lokasi, l2.namalokasi AS lokasi_tujuan,
+        b.kodebarang, b.namabarang, COALESCE(tsd.satuan, b.satuankecil) AS satuan, tsd.jml
+      FROM transferstok ts
+      JOIN transferstokdtl tsd ON tsd.idtransferstok = ts.idtransferstok AND tsd.idtenant = ts.idtenant
+      JOIN barang b ON b.idbarang = tsd.idbarang AND b.idtenant = ts.idtenant
+      JOIN lokasi l1 ON l1.idlokasi = ts.idlokasi AND l1.idtenant = ts.idtenant
+      JOIN lokasi l2 ON l2.idlokasi = ts.idlokasitujuan AND l2.idtenant = ts.idtenant
+      WHERE ts.idtenant = ?`;
+    const params = [ctx.idtenant];
+    if (tglwal) { sql += ' AND ts.tgltrans >= ?'; params.push(tglwal); }
+    if (tglakhir) { sql += ' AND ts.tgltrans <= ?'; params.push(tglakhir); }
+    if (idlokasi) { const r = multiIdIn('ts.idlokasi', idlokasi); if (r.clause) { sql += ' AND ' + r.clause; params.push(...r.params); } }
+    if (idlokasitujuan) { const r = multiIdIn('ts.idlokasitujuan', idlokasitujuan); if (r.clause) { sql += ' AND ' + r.clause; params.push(...r.params); } }
+    if (idbarang) { const r = multiIdIn('tsd.idbarang', idbarang); if (r.clause) { sql += ' AND ' + r.clause; params.push(...r.params); } }
+    sql += ' ORDER BY ts.tgltrans DESC, ts.kodetransferstok DESC, b.namabarang ASC';
+    const rows = await tenantQuery(sql, params);
+    const mapped = rows.map(r => ({ ...r, status: ['DIKIRIM', 'DITERIMA', 'KIRIM', 'TERIMA'].includes(r.status) ? 'APPROVED' : r.status === 'DIBATALKAN' ? 'CANCELLED' : r.status }));
+    if (format === 'html') {
+      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      return sendSimpleStokReport(res, 'Laporan Transfer Stok', mapped, {
+        tglwal, tglakhir, showTujuan: true,
+        namatoko: tenant?.namatenant || 'Grfyn POS',
+        alamat: '', hp: '', logo: tenant?.logo || '',
+        tglcetak: new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' })
+      });
+    }
+    res.json({ data: mapped });
   } catch (err) {
     logger.error(err, { req });
     res.status(500).json({ message: err.message });

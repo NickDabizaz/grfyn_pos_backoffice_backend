@@ -26,6 +26,7 @@ async function getStok(idbarang, idlokasi, tgl) {
             WHERE a.idtenant = ?
               AND a.idlokasi = ?
               AND b.idbarang = ?
+              AND a.status IN ('APPROVED', 'AKTIF')
               AND a.tgltrans = (
                   SELECT MAX(a1.tgltrans)
                   FROM saldostok a1
@@ -33,6 +34,7 @@ async function getStok(idbarang, idlokasi, tgl) {
                   WHERE a1.idtenant = ?
                     AND a1.idlokasi = ?
                     AND b1.idbarang = ?
+                    AND a1.status IN ('APPROVED', 'AKTIF')
                     AND a1.tgltrans <= ?
               )
 
@@ -51,6 +53,7 @@ async function getStok(idbarang, idlokasi, tgl) {
                   WHERE a1.idtenant = ?
                     AND a1.idlokasi = ?
                     AND b1.idbarang = ?
+                    AND a1.status IN ('APPROVED', 'AKTIF')
                     AND a1.tgltrans <= ?
               )
               AND d.tgltrans <= ?

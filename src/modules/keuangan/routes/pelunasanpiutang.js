@@ -6,6 +6,10 @@ const { requireAccess } = require('../../../lib/access');
 router.get('/', auth, requireAccess('keuangan.pelunasanpiutang', 'hakakses'), ctrl.getAll);
 router.get('/:id', auth, requireAccess('keuangan.pelunasanpiutang', 'hakakses'), ctrl.getOne);
 router.post('/', auth, requireAccess('keuangan.pelunasanpiutang', 'tambah'), ctrl.create);
-router.delete('/:id', auth, requireAccess('keuangan.pelunasanpiutang', 'tambah'), ctrl.remove);
+router.put('/:id', auth, requireAccess('keuangan.pelunasanpiutang', 'ubah'), ctrl.update);
+router.put('/:id/approve', auth, requireAccess('keuangan.pelunasanpiutang', 'ubah'), ctrl.approve);
+router.put('/:id/unapprove', auth, requireAccess('keuangan.pelunasanpiutang', 'ubah'), ctrl.unapprove);
+router.put('/:id/batal', auth, requireAccess('keuangan.pelunasanpiutang', 'ubah'), ctrl.cancel);
+router.delete('/:id', auth, requireAccess('keuangan.pelunasanpiutang', 'ubah'), ctrl.remove);
 
 module.exports = router;

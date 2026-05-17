@@ -156,7 +156,7 @@ async function migrate() {
       hp            VARCHAR(20) DEFAULT NULL,
       isowner       TINYINT DEFAULT 0,
       tokenversion  INT DEFAULT 1,
-      status        VARCHAR(20) DEFAULT 'AKTIF',
+      status        VARCHAR(20) DEFAULT 'DRAFT',
       userentry     INT NOT NULL DEFAULT 0,
       tglentry      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
@@ -170,7 +170,7 @@ async function migrate() {
       idmenutemplate  INT AUTO_INCREMENT PRIMARY KEY,
       idtenant        INT NOT NULL,
       namatemplate    VARCHAR(100) NOT NULL,
-      status          VARCHAR(20) DEFAULT 'AKTIF',
+      status          VARCHAR(20) DEFAULT 'APPROVED',
       userentry       INT NOT NULL DEFAULT 0,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant)
     ) ENGINE=InnoDB
@@ -1480,6 +1480,8 @@ async function migrate() {
   const laporanStokLeaves = [
     [61, 52, 'laporan.stok.sekarang',  'Stok',       1, null, null],
     [62, 52, 'laporan.stok.kartustok', 'Kartu Stok', 2, null, null],
+    [63, 52, 'laporan.stok.opname',    'Opname Stok', 3, null, null],
+    [64, 52, 'laporan.stok.transfer',  'Transfer Stok', 4, null, null],
   ];
   for (const m of laporanStokLeaves) {
     await connection.query(
