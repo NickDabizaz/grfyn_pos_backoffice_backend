@@ -137,13 +137,26 @@ mengambil opsi dari `GET /api/akun`.
 
 ---
 
-## 4. Form Kas
+## 4. Form Kas — alur status DRAFT/APPROVED
 
-Jurnal kas kini divalidasi **balance**: total nilai sisi DEBET harus sama
-dengan sisi KREDIT. Konvensi input baris `details`: nominal positif = DEBET,
-nominal negatif = KREDIT. Jika tidak balance, `POST/PUT /api/kas` mengembalikan
-`400` dengan pesan "Jurnal ... tidak balance". Pastikan form Kas mengirim baris
-akun lengkap (termasuk baris kas/bank lawannya) sehingga seimbang.
+Transaksi Kas kini memiliki alur status seperti transaksi lain:
+**DRAFT → APPROVED**, serta **CANCELLED**. Jurnal akuntansi hanya diposting saat
+transaksi di-approve dan dihapus saat batal approve. Akun pada baris Kas tetap
+dipilih manual oleh user (Kas tidak memakai Setting Default Jurnal).
+
+- `POST /api/kas` — body `{ tgltrans?, approve?, details:[{idakun,catatan,amount}] }`.
+  `approve:true` → langsung APPROVED, jika tidak status DRAFT.
+- `PUT /api/kas/:id` — edit (hanya status DRAFT); boleh sertakan `approve:true`.
+- `PUT /api/kas/:id/approve` — DRAFT → APPROVED (posting jurnal).
+- `PUT /api/kas/:id/unapprove` — APPROVED → DRAFT (hapus jurnal).
+- `PUT /api/kas/:id/cancel` — DRAFT → CANCELLED.
+- `DELETE /api/kas/:id` — hapus permanen (tidak boleh saat status APPROVED).
+
+Jurnal kas divalidasi **balance**: konvensi baris `details` — nominal positif =
+DEBET, nominal negatif = KREDIT; total DEBET harus sama dengan total KREDIT.
+Jika tidak seimbang, backend mengembalikan `400` "Jurnal ... tidak balance"
+(dicek saat approve). Pastikan form Kas mengirim baris akun lengkap (termasuk
+baris kas/bank lawannya).
 
 ---
 

@@ -376,7 +376,7 @@ async function migrate() {
       kodekas     VARCHAR(30) NOT NULL,
       tgltrans    DATE NOT NULL,
       iduser      INT NOT NULL,
-      status      VARCHAR(20) DEFAULT 'AKTIF',
+      status      VARCHAR(20) DEFAULT 'DRAFT',
       userentry   INT NOT NULL DEFAULT 0,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
