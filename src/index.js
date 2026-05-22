@@ -50,6 +50,8 @@ const stockOpnameRoutes     = require('./modules/stok/routes/stockOpname');
 const karyawanRoutes        = require('./modules/hr/routes/karyawan');
 const absensiRoutes         = require('./modules/hr/routes/absensi');
 const payrollRoutes         = require('./modules/hr/routes/payroll');
+const subscriptionRoutes    = require('./modules/subscription/routes/subscription');
+const { ensureSubscriptionSchema } = require('./lib/subscription');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -110,6 +112,7 @@ app.use('/api/stock-opname', stockOpnameRoutes);
 app.use('/api/karyawan', karyawanRoutes);
 app.use('/api/absensi', absensiRoutes);
 app.use('/api/payroll', payrollRoutes);
+app.use('/api/subscription', subscriptionRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -133,6 +136,11 @@ const server = app.listen(PORT, () => {
   if (process.env.DEVELOPER_PORTAL_ENABLED !== 'false') {
     console.log(`Developer Portal: http://localhost:${PORT}/developer`);
   }
+});
+
+ensureSubscriptionSchema().catch((err) => {
+  logger.error(err, { context: 'ensureSubscriptionSchema' });
+  console.error('Subscription schema initialization failed:', err.message);
 });
 
 // Handle error saat server start (misal port sudah dipakai)

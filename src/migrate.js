@@ -104,6 +104,7 @@ async function migrate() {
 
   // Drop tables in reverse dependency order (child first, parent last)
   const tables = [
+    'subscription_payment',
     'menutemplatedtl', 'usermenu', 'userlokasi',
     'closingdtl', 'closing',
     'payrolldtl', 'payroll',
@@ -135,6 +136,7 @@ async function migrate() {
     'menutemplate',
     'config',
     'user', 'lokasi', 'tenant',
+    'subscription_plan',
     'menu', 'currency',
     'historyprogram'
   ];
@@ -196,6 +198,23 @@ async function migrate() {
   // TENANT TABLES
   // ============================================================
 
+  // subscription plan
+  await connection.query(`
+    CREATE TABLE subscription_plan (
+      idplan INT AUTO_INCREMENT PRIMARY KEY,
+      kodeplan VARCHAR(20) NOT NULL UNIQUE,
+      namaplan VARCHAR(50) NOT NULL,
+      harga DECIMAL(15,2) NOT NULL DEFAULT 0,
+      monthly_transaction_limit INT DEFAULT NULL,
+      max_users INT DEFAULT NULL,
+      has_backup TINYINT(1) NOT NULL DEFAULT 0,
+      has_support TINYINT(1) NOT NULL DEFAULT 0,
+      status VARCHAR(20) NOT NULL DEFAULT 'AKTIF',
+      userentry INT NOT NULL DEFAULT 0,
+      tglentry TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB
+  `);
+
   // tenant
   await connection.query(`
     CREATE TABLE tenant (
@@ -208,9 +227,39 @@ async function migrate() {
       ppn         DECIMAL(5,2) DEFAULT 0,
       idcurrency  INT DEFAULT 1,
       logo        VARCHAR(255) DEFAULT NULL,
+      subscription_plan VARCHAR(20) NOT NULL DEFAULT 'FREE',
+      subscription_status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+      subscription_started_at DATETIME DEFAULT NULL,
+      subscription_expires_at DATETIME DEFAULT NULL,
       status      VARCHAR(20) DEFAULT 'AKTIF',
       userentry   INT NOT NULL DEFAULT 0,
       FOREIGN KEY (idcurrency) REFERENCES currency(idcurrency)
+    ) ENGINE=InnoDB
+  `);
+
+  // subscription payment
+  await connection.query(`
+    CREATE TABLE subscription_payment (
+      idpayment INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant INT NOT NULL,
+      order_id VARCHAR(100) NOT NULL UNIQUE,
+      plan_code VARCHAR(20) NOT NULL,
+      amount DECIMAL(15,2) NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+      midtrans_token VARCHAR(255) DEFAULT NULL,
+      midtrans_redirect_url VARCHAR(500) DEFAULT NULL,
+      midtrans_transaction_status VARCHAR(50) DEFAULT NULL,
+      midtrans_payment_type VARCHAR(50) DEFAULT NULL,
+      midtrans_fraud_status VARCHAR(50) DEFAULT NULL,
+      paid_at DATETIME DEFAULT NULL,
+      expired_at DATETIME DEFAULT NULL,
+      raw_notification TEXT DEFAULT NULL,
+      userentry INT NOT NULL DEFAULT 0,
+      tglentry TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      INDEX idx_subscription_payment_tenant (idtenant),
+      INDEX idx_subscription_payment_status (status)
     ) ENGINE=InnoDB
   `);
 
@@ -1447,6 +1496,15 @@ async function migrate() {
   await connection.query(
     `INSERT INTO currency (kodecurrency, namacurrency, simbol, kurs, status) VALUES (?, ?, ?, ?, ?)`,
     ['IDR', 'Rupiah', 'Rp', 1.0000, 'AKTIF']
+  );
+
+  // Seed subscription plans
+  await connection.query(
+    `INSERT INTO subscription_plan
+      (kodeplan, namaplan, harga, monthly_transaction_limit, max_users, has_backup, has_support, status, userentry)
+     VALUES
+      ('FREE', 'Free', 0, 50, 1, 0, 0, 'AKTIF', 0),
+      ('PRO', 'Pro', 99000, NULL, NULL, 1, 1, 'AKTIF', 0)`
   );
 
   // Seed menu — top-level

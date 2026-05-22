@@ -3,6 +3,7 @@ const { generateKodeJual, generateKodePelunasanPiutang } = require('../../lib/ko
 const { getConfigValue, setConfigValue } = require('../../lib/confighelper');
 const jurnalhelper = require('../../lib/jurnalhelper');
 const logger = require('../../lib/logger');
+const { buildSubscriptionStatus } = require('../../lib/subscription');
 
 // GET /api/pos/modalawal/today
 exports.getModalAwalToday = async (req, res) => {
@@ -192,7 +193,7 @@ exports.createTransaksi = async (req, res) => {
   } catch (err) {
     await conn.rollback();
     logger.error(err, { req });
-    res.status(500).json({ message: err.message });
+    res.status(err.statusCode || 500).json({ message: err.message, code: err.code, details: err.details });
   } finally {
     conn.release();
   }
@@ -406,10 +407,12 @@ exports.getSetting = async (req, res) => {
     const nonTunai = await getConfigValue(pool, ctx.idtenant, 'POS', 'NON_TUNAI');
     const hargaIncludePpn = await getConfigValue(pool, ctx.idtenant, 'POS', 'HARGA_INCLUDE_PPN');
     const [[tenant]] = await pool.query('SELECT ppn FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+    const subscription = await buildSubscriptionStatus(pool, ctx.idtenant);
     res.json({
       non_tunai: nonTunai ? JSON.parse(nonTunai) : [],
       harga_include_ppn: String(hargaIncludePpn || 'YA').toUpperCase() === 'YA',
       ppn_percent: parseFloat(tenant?.ppn || 0),
+      subscription,
     });
   } catch (err) {
     logger.error(err, { req });

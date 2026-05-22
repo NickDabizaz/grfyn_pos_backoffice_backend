@@ -5,6 +5,7 @@ const bcrypt = require('bcryptjs');
 const { pool, tenantQuery, tenantExecute, getConnection, getTenantContext } = require('../../config/db');
 const logger = require('../../lib/logger');
 const { ACCESS_FIELDS, fullAccess, normalizeAccess, hasAnyAccess } = require('../../lib/access');
+const { assertCanHaveActiveUser } = require('../../lib/subscription');
 
 function normalizeMenuPayload(menu) {
   if (typeof menu === 'number' || typeof menu === 'string') {
@@ -83,6 +84,8 @@ exports.create = async (req, res) => {
       return res.status(400).json({ message: 'Username sudah digunakan' });
     }
 
+    await assertCanHaveActiveUser(conn, ctx.idtenant);
+
     await conn.beginTransaction();
 
     // Password di-hash dengan bcrypt 10 salt rounds
@@ -147,7 +150,7 @@ exports.create = async (req, res) => {
       return res.status(409).json({ message: 'Username sudah digunakan' });
     }
     logger.error(err, { req });
-    res.status(500).json({ message: err.message });
+    res.status(err.statusCode || 500).json({ message: err.message, code: err.code, details: err.details });
   } finally {
     conn.release();
   }
@@ -173,10 +176,14 @@ exports.update = async (req, res) => {
       return res.status(400).json({ message: 'Owner tidak dapat dinonaktifkan' });
     }
 
+    const newStatus = status || target.status;
+    if (String(newStatus).toUpperCase() === 'AKTIF') {
+      await assertCanHaveActiveUser(conn, ctx.idtenant, id);
+    }
+
     await conn.beginTransaction();
 
     // Update data user — tokenversion di-increment agar token lama tidak valid
-    const newStatus = status || target.status;
     let sqlUpdateUser = 'UPDATE user SET namauser = ?, email = ?, hp = ?, status = ?, tokenversion = tokenversion + 1 WHERE iduser = ? AND idtenant = ?';
     await conn.query(
       sqlUpdateUser,
@@ -211,7 +218,7 @@ exports.update = async (req, res) => {
   } catch (err) {
     await conn.rollback();
     logger.error(err, { req });
-    res.status(500).json({ message: err.message });
+    res.status(err.statusCode || 500).json({ message: err.message, code: err.code, details: err.details });
   } finally {
     conn.release();
   }

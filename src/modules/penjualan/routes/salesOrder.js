@@ -2,10 +2,11 @@ const router = require('express').Router();
 const ctrl = require('../salesOrderController');
 const auth = require('../../../middleware/auth');
 const { requireAccess, requireApproveWhenRequested } = require('../../../lib/access');
+const { requireTransactionQuota } = require('../../../middleware/subscription');
 
 router.get('/', auth, requireAccess('penjualan.so', 'hakakses'), ctrl.getAll);
 router.get('/:id', auth, requireAccess('penjualan.so', 'hakakses'), ctrl.getOne);
-router.post('/', auth, requireAccess('penjualan.so', 'tambah'), requireApproveWhenRequested('penjualan.so'), ctrl.create);
+router.post('/', auth, requireAccess('penjualan.so', 'tambah'), requireTransactionQuota(), requireApproveWhenRequested('penjualan.so'), ctrl.create);
 router.put('/:id/approve', auth, requireAccess('penjualan.so', 'approve'), ctrl.approve);
 router.put('/:id/unapprove', auth, requireAccess('penjualan.so', 'batalapprove'), ctrl.unapprove);
 router.put('/:id/batal', auth, requireAccess('penjualan.so', 'bataltransaksi'), ctrl.batal);

@@ -3,10 +3,11 @@ const ctrl = require('../returbeliController');
 const auth = require('../../../middleware/auth');
 const { requireAccess } = require('../../../lib/access');
 const { validateReturBeli } = require('../../../middleware/validateRequest');
+const { requireTransactionQuota } = require('../../../middleware/subscription');
 
 router.get('/', auth, requireAccess('pembelian.retur', 'hakakses'), ctrl.getAll);
 router.get('/:id', auth, requireAccess('pembelian.retur', 'hakakses'), ctrl.getOne);
-router.post('/', auth, requireAccess('pembelian.retur', 'tambah'), validateReturBeli, ctrl.create);
+router.post('/', auth, requireAccess('pembelian.retur', 'tambah'), requireTransactionQuota(), validateReturBeli, ctrl.create);
 router.put('/:id/approve', auth, requireAccess('pembelian.retur', 'ubah'), ctrl.approve);
 router.put('/:id', auth, requireAccess('pembelian.retur', 'ubah'), validateReturBeli, ctrl.update);
 router.put('/:id/unapprove', auth, requireAccess('pembelian.retur', 'ubah'), ctrl.unapprove);
