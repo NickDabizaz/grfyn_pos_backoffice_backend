@@ -365,6 +365,9 @@ exports.midtransNotification = async (req, res) => {
   } catch (err) {
     try { await conn.rollback(); } catch (_) {}
     logger.error(err, { req });
+    if (err.statusCode === 400 || err.statusCode === 404) {
+      return res.json({ message: 'OK', ignored: true, reason: err.message });
+    }
     res.status(err.statusCode || 500).json({ message: err.message });
   } finally {
     conn.release();
