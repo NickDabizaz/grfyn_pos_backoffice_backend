@@ -247,6 +247,11 @@ exports.checkout = async (req, res) => {
     await requireOwner(ctx);
     await syncPendingPayments(ctx.idtenant, req);
 
+    const { isPro } = await getEffectiveSubscription(conn, ctx.idtenant);
+    if (isPro) {
+      return res.status(409).json({ message: 'Tenant sudah aktif PRO. Pembayaran baru tidak diperlukan.' });
+    }
+
     const [[plan]] = await conn.query(
       "SELECT * FROM subscription_plan WHERE kodeplan = 'PRO' AND status = 'AKTIF' LIMIT 1"
     );

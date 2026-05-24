@@ -4,7 +4,7 @@
 
 <div class="mb-6">
   <h1 class="text-xl font-bold text-white">Tenant Overview</h1>
-  <p class="text-sm text-gray-500 mt-1">All tenants with aggregate statistics</p>
+  <p class="text-sm text-gray-500 mt-1">All tenants with aggregate statistics. Use SQL Backup to export tenant-owned database rows.</p>
 </div>
 
 <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
@@ -26,6 +26,7 @@
             <th class="text-center px-4 py-2.5 text-xs font-medium text-gray-400 uppercase">Trans Beli</th>
             <th class="text-left px-4 py-2.5 text-xs font-medium text-gray-400 uppercase">Last Activity</th>
             <th class="text-center px-4 py-2.5 text-xs font-medium text-gray-400 uppercase">Status</th>
+            <th class="text-right px-4 py-2.5 text-xs font-medium text-gray-400 uppercase">Backup</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-800">
@@ -46,6 +47,15 @@
             </td>
             <td class="px-4 py-3 text-center">
               <span class="inline-flex px-2 py-0.5 rounded text-xs font-medium <%= t.status === 'AKTIF' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400' %>"><%= t.status %></span>
+            </td>
+            <td class="px-4 py-3 text-right">
+              <a
+                href="/developer/tenants/<%= t.idtenant %>/backup.sql"
+                class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 border border-blue-500/20 text-xs font-medium transition-colors"
+              >
+                <i data-lucide="database-backup" class="w-3.5 h-3.5"></i>
+                SQL Backup
+              </a>
             </td>
           </tr>
           <% }); %>

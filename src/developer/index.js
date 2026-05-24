@@ -58,6 +58,7 @@ router.get('/system', systemController.index);
 router.get('/system/api', systemController.api);
 
 router.get('/tenants', tenantController.index);
+router.get('/tenants/:idtenant/backup.sql', tenantController.downloadBackup);
 
 router.get('/db-console', dbConsoleController.index);
 router.post('/db-console', dbConsoleController.execute);

@@ -315,7 +315,7 @@ async function buildSubscriptionStatus(conn, idtenant) {
       active_users: usedUsers,
     },
     support: isPro ? {
-      url: process.env.ADMIN_SUPPORT_URL || null,
+      url: process.env.ADMIN_SUPPORT_URL || 'https://wa.me/6285331476532',
       email: process.env.ADMIN_SUPPORT_EMAIL || null,
     } : null,
     recent_payments: payments,
