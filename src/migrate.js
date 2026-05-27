@@ -113,6 +113,7 @@ async function migrate() {
     'penyusutan_aset', 'aset',
     'poin_transaksi', 'poin_customer', 'poin_setting',
     'hargajual_leveldtl', 'hargajual_level',
+    'promobarang_gratis', 'promodtl', 'promo',
     'diskondtl', 'diskon',
     'subscription_payment',
     'menutemplatedtl', 'usermenu', 'userlokasi',
@@ -566,6 +567,8 @@ async function migrate() {
       kodebpk     VARCHAR(50) DEFAULT NULL,
       jalurpenjualan VARCHAR(20) NOT NULL DEFAULT 'LANGSUNG',
       is_lunaslangsung TINYINT(1) NOT NULL DEFAULT 0,
+      idpromo     INT DEFAULT NULL,
+      diskon_promo DECIMAL(15,2) DEFAULT 0,
       status      VARCHAR(20) DEFAULT 'DRAFT',
       userentry   INT NOT NULL DEFAULT 0,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
@@ -580,16 +583,19 @@ async function migrate() {
   // jualdtl
   await connection.query(`
     CREATE TABLE jualdtl (
-      idjualdtl INT AUTO_INCREMENT PRIMARY KEY,
-      idjual    INT NOT NULL,
-      idtenant  INT NOT NULL,
-      idbarang  INT NOT NULL,
-      satuan    VARCHAR(20) DEFAULT NULL,
-      jml       DECIMAL(15,3) NOT NULL,
-      harga     DECIMAL(15,2) NOT NULL,
-      ppn       DECIMAL(15,2) DEFAULT 0,
-      diskon    DECIMAL(5,2) DEFAULT 0,
-      subtotal  DECIMAL(15,2) NOT NULL,
+      idjualdtl   INT AUTO_INCREMENT PRIMARY KEY,
+      idjual      INT NOT NULL,
+      idtenant    INT NOT NULL,
+      idbarang    INT NOT NULL,
+      satuan      VARCHAR(20) DEFAULT NULL,
+      jml         DECIMAL(15,3) NOT NULL,
+      harga       DECIMAL(15,2) NOT NULL,
+      ppn         DECIMAL(15,2) DEFAULT 0,
+      diskon      DECIMAL(5,2) DEFAULT 0,
+      subtotal    DECIMAL(15,2) NOT NULL,
+      idpromo     INT DEFAULT NULL,
+      diskon_promo DECIMAL(15,2) DEFAULT 0,
+      is_gratis   TINYINT(1) NOT NULL DEFAULT 0,
       FOREIGN KEY (idjual) REFERENCES jual(idjual) ON DELETE CASCADE,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idbarang) REFERENCES barang(idbarang),
@@ -614,6 +620,8 @@ async function migrate() {
       kodebpb     VARCHAR(50) DEFAULT NULL,
       jalurpembelian VARCHAR(20) NOT NULL DEFAULT 'LANGSUNG',
       is_lunaslangsung TINYINT(1) NOT NULL DEFAULT 0,
+      idpromo     INT DEFAULT NULL,
+      diskon_promo DECIMAL(15,2) DEFAULT 0,
       status      VARCHAR(20) DEFAULT 'DRAFT',
       userentry   INT NOT NULL DEFAULT 0,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
@@ -628,16 +636,19 @@ async function migrate() {
   // belidtl
   await connection.query(`
     CREATE TABLE belidtl (
-      idbelidtl INT AUTO_INCREMENT PRIMARY KEY,
-      idbeli    INT NOT NULL,
-      idtenant  INT NOT NULL,
-      idbarang  INT NOT NULL,
-      satuan    VARCHAR(20) DEFAULT NULL,
-      jml       DECIMAL(15,3) NOT NULL,
-      harga     DECIMAL(15,2) NOT NULL,
-      ppn       DECIMAL(15,2) DEFAULT 0,
-      diskon    DECIMAL(5,2) DEFAULT 0,
-      subtotal  DECIMAL(15,2) NOT NULL,
+      idbelidtl   INT AUTO_INCREMENT PRIMARY KEY,
+      idbeli      INT NOT NULL,
+      idtenant    INT NOT NULL,
+      idbarang    INT NOT NULL,
+      satuan      VARCHAR(20) DEFAULT NULL,
+      jml         DECIMAL(15,3) NOT NULL,
+      harga       DECIMAL(15,2) NOT NULL,
+      ppn         DECIMAL(15,2) DEFAULT 0,
+      diskon      DECIMAL(5,2) DEFAULT 0,
+      subtotal    DECIMAL(15,2) NOT NULL,
+      idpromo     INT DEFAULT NULL,
+      diskon_promo DECIMAL(15,2) DEFAULT 0,
+      is_gratis   TINYINT(1) NOT NULL DEFAULT 0,
       FOREIGN KEY (idbeli) REFERENCES beli(idbeli) ON DELETE CASCADE,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idbarang) REFERENCES barang(idbarang),
@@ -1536,6 +1547,65 @@ async function migrate() {
       idtenant INT NOT NULL,
       idbarang INT NOT NULL,
       FOREIGN KEY (iddiskon) REFERENCES diskon(idiskon) ON DELETE CASCADE,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idbarang) REFERENCES barang(idbarang)
+    ) ENGINE=InnoDB
+  `);
+
+  // promo
+  await connection.query(`
+    CREATE TABLE promo (
+      idpromo               INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant              INT NOT NULL,
+      kodepromo             VARCHAR(30) NOT NULL,
+      namapromo             VARCHAR(150) NOT NULL,
+      deskripsi             TEXT DEFAULT NULL,
+      jenis                 ENUM('PERSEN_ITEM','NOMINAL_ITEM','PERSEN_TRANSAKSI','NOMINAL_TRANSAKSI','BELI_X_GRATIS_Y') NOT NULL DEFAULT 'PERSEN_TRANSAKSI',
+      berlaku_untuk         ENUM('PENJUALAN','PEMBELIAN','KEDUANYA') NOT NULL DEFAULT 'PENJUALAN',
+      nilai                 DECIMAL(15,2) NOT NULL DEFAULT 0,
+      nilai_x               DECIMAL(15,3) DEFAULT NULL,
+      nilai_y               DECIMAL(15,3) DEFAULT NULL,
+      min_transaksi         DECIMAL(15,2) DEFAULT 0,
+      min_qty               DECIMAL(15,3) DEFAULT 0,
+      max_diskon            DECIMAL(15,2) DEFAULT NULL,
+      berlaku_semua_barang  TINYINT(1) NOT NULL DEFAULT 1,
+      tglawal               DATE NOT NULL,
+      tglakhir              DATE NOT NULL,
+      max_penggunaan        INT DEFAULT NULL,
+      jumlah_digunakan      INT NOT NULL DEFAULT 0,
+      status                VARCHAR(20) DEFAULT 'AKTIF',
+      userentry             INT DEFAULT 0,
+      tglentry              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      UNIQUE KEY uq_promo_kode (idtenant, kodepromo),
+      INDEX idx_promo_tgl (tglawal, tglakhir),
+      INDEX idx_promo_status (status)
+    ) ENGINE=InnoDB
+  `);
+
+  // promodtl — barang target promo (jika berlaku_semua_barang = 0)
+  await connection.query(`
+    CREATE TABLE promodtl (
+      idpromodtl INT AUTO_INCREMENT PRIMARY KEY,
+      idpromo    INT NOT NULL,
+      idtenant   INT NOT NULL,
+      idbarang   INT NOT NULL,
+      FOREIGN KEY (idpromo) REFERENCES promo(idpromo) ON DELETE CASCADE,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idbarang) REFERENCES barang(idbarang),
+      UNIQUE KEY uq_promodtl (idpromo, idbarang)
+    ) ENGINE=InnoDB
+  `);
+
+  // promobarang_gratis — barang gratis untuk promo BELI_X_GRATIS_Y
+  await connection.query(`
+    CREATE TABLE promobarang_gratis (
+      idpromobaranggratis INT AUTO_INCREMENT PRIMARY KEY,
+      idpromo             INT NOT NULL,
+      idtenant            INT NOT NULL,
+      idbarang            INT NOT NULL,
+      jml                 DECIMAL(15,3) NOT NULL DEFAULT 1,
+      FOREIGN KEY (idpromo) REFERENCES promo(idpromo) ON DELETE CASCADE,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idbarang) REFERENCES barang(idbarang)
     ) ENGINE=InnoDB
