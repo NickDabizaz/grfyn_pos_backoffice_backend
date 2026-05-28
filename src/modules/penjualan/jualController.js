@@ -299,10 +299,12 @@ exports.getOne = async (req, res) => {
     const rows = await tenantQuery(
       `SELECT j.*, DATE_FORMAT(j.tgltrans, '%Y-%m-%d') AS tgltrans,
               c.namacustomer, c.kodecustomer, c.alamat AS calamat, c.hp AS chp,
-              l.namalokasi, l.kodelokasi, COALESCE(kp.status, 'BELUMLUNAS') as statuslunas
+              l.namalokasi, l.kodelokasi, p.kodepromo, p.namapromo,
+              COALESCE(kp.status, 'BELUMLUNAS') as statuslunas
        FROM jual j
        LEFT JOIN customer c ON j.idcustomer = c.idcustomer AND c.idtenant = j.idtenant
        LEFT JOIN lokasi l ON j.idlokasi = l.idlokasi AND l.idtenant = j.idtenant
+       LEFT JOIN promo p ON p.idpromo = j.idpromo AND p.idtenant = j.idtenant
        LEFT JOIN kartupiutang kp ON kp.kodetrans = j.kodejual AND kp.status = 'LUNAS' AND kp.idtenant = j.idtenant
        WHERE j.idjual = ? AND j.idtenant = ?`,
       [id, ctx.idtenant]

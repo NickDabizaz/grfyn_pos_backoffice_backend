@@ -10,13 +10,17 @@ const itemSchema = z.object({
 });
 
 const jualSchema = z.object({
+  kodejual      : z.string().optional().nullable(),
   idcustomer    : z.number({ required_error: 'customer wajib dipilih' }).int().positive('customer wajib dipilih'),
   idlokasi      : z.number({ required_error: 'lokasi wajib dipilih' }).int().positive('lokasi wajib dipilih'),
+  grandtotal    : z.number().nonnegative('grandtotal tidak boleh negatif').optional(),
+  bayar         : z.number().nonnegative('bayar tidak boleh negatif').optional(),
   tgltrans      : z.string().optional(),
   approve       : z.boolean().optional(),
   is_lunaslangsung: z.boolean().optional(),
   langsung_lunas: z.boolean().optional(),
   metodbayar    : z.string().optional(),
+  idpromo       : z.number().int().positive().optional().nullable(),
   idbpk         : z.number().int().positive().optional().nullable(),
   kodebpk       : z.string().optional().nullable(),
   jalurpenjualan: z.enum(['PESANAN', 'LANGSUNG']).optional(),
@@ -28,6 +32,7 @@ const jualSchema = z.object({
     satuan   : z.string().optional(),
     diskon   : z.number().min(0).max(100).optional().default(0),
     ppn_mode : z.string().optional(),
+    is_gratis: z.boolean().optional().default(false),
   })).min(1, 'Minimal 1 item diperlukan'),
 });
 
@@ -35,12 +40,14 @@ const beliSchema = z.object({
   kodebeli   : z.string().optional().nullable(),
   idlokasi   : z.number({ required_error: 'lokasi wajib dipilih' }).int().positive('lokasi wajib dipilih'),
   idsupplier : z.number({ required_error: 'supplier wajib dipilih' }).int().positive('supplier wajib dipilih'),
+  grandtotal : z.number().nonnegative('grandtotal tidak boleh negatif').optional(),
   bayar      : z.number().nonnegative('bayar tidak boleh negatif').optional().default(0),
   metodbayar : z.string().optional(),
   tgltrans   : z.string().optional(),
   useppn     : z.boolean().optional(),
   langsung_lunas: z.boolean().optional(),
   approve    : z.boolean().optional(),
+  idpromo    : z.number().int().positive().optional().nullable(),
   idbpb      : z.number().int().positive().optional().nullable(),
   kodebpb    : z.string().optional().nullable(),
   jalurpembelian: z.enum(['PESANAN', 'LANGSUNG']).optional(),
@@ -51,6 +58,7 @@ const beliSchema = z.object({
     satuan   : z.string().optional(),
     diskon   : z.number().min(0).max(100).optional().default(0),
     ppn_mode : z.string().optional(),
+    is_gratis: z.boolean().optional().default(false),
   })).min(1, 'Minimal 1 item diperlukan'),
 });
 

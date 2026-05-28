@@ -338,10 +338,12 @@ exports.getOne = async (req, res) => {
     const queryHeader = `
       SELECT b.*, DATE_FORMAT(b.tgltrans, '%Y-%m-%d') AS tgltrans,
              s.namasupplier, s.kodesupplier, s.alamat AS salamat, s.hp AS shp,
-             l.namalokasi, l.kodelokasi, COALESCE(kh.status, 'BELUMLUNAS') as statuslunas
+             l.namalokasi, l.kodelokasi, p.kodepromo, p.namapromo,
+             COALESCE(kh.status, 'BELUMLUNAS') as statuslunas
       FROM beli b
       LEFT JOIN supplier s ON b.idsupplier = s.idsupplier AND s.idtenant = b.idtenant
       LEFT JOIN lokasi l ON b.idlokasi = l.idlokasi AND l.idtenant = b.idtenant
+      LEFT JOIN promo p ON p.idpromo = b.idpromo AND p.idtenant = b.idtenant
       LEFT JOIN kartuhutang kh ON kh.kodetrans = b.kodebeli AND kh.status = 'LUNAS' AND kh.idtenant = b.idtenant
       WHERE b.idbeli = ? AND b.idtenant = ?
     `;
