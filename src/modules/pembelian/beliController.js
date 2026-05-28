@@ -1,6 +1,7 @@
 const { tenantQuery, tenantExecute, getConnection, getTenantContext } = require('../../config/db');
 const { generateKodeBeli, generateKodePelunasanHutang }               = require('../../lib/kodetrans');
 const jurnalhelper                                                    = require('../../lib/jurnalhelper');
+const promoHelper                                                     = require('../../lib/promoHelper');
 const logger                                                          = require('../../lib/logger');
 
 // Konversi jumlah item ke satuan terkecil (satuankecil) untuk konsistensi kartu stok
@@ -110,9 +111,10 @@ exports.create = async (req, res) => {
     const idlokasi   = (customIdlokasi && parseInt(customIdlokasi)) ? parseInt(customIdlokasi) : null;
     const tgltrans   = req.body.tgltrans   || new Date().toISOString().slice(0, 10);
     const kodebeli   = (customKodebeli && customKodebeli.trim()) ? customKodebeli.trim() : await generateKodeBeli(conn, ctx.idtenant, idlokasi);
-    const approve = req.body.approve === true || req.body.status === 'APPROVED';
+    const approve    = req.body.approve === true || req.body.status === 'APPROVED';
     const idbpb      = req.body.idbpb   || null;
     const kodebpb    = req.body.kodebpb || null;
+    const idpromo    = req.body.idpromo  || null;
     const jalurpembelian = idbpb ? 'PESANAN' : (req.body.jalurpembelian || 'LANGSUNG');
     const jenistransaksi = `${jalurpembelian === 'PESANAN' ? 'PEMBELIAN PESANAN' : 'PEMBELIAN LANGSUNG'}${langsungLunas ? ' LUNAS' : ''}`;
     const statusBeli = approve ? 'APPROVED' : 'DRAFT';
@@ -132,66 +134,74 @@ exports.create = async (req, res) => {
     const ppnPercent   = tenant ? parseFloat(tenant.ppn) : 11;
     let   grandTotal   = 0;
 
+    // Hitung promo (jika ada)
+    const baseItems = items.map(item => {
+      const harga   = parseFloat(item.harga);
+      const jml     = parseFloat(item.jml) || 1;
+      const diskon  = parseFloat(item.diskon) || 0;
+      const ppnMode = item.ppn_mode || 'INCLUDE';
+      const ppnRp   = ppnMode === 'INCLUDE' ? (harga * jml * ppnPercent) / 100 : 0;
+      const disknRp = (harga * jml * diskon) / 100;
+      const subtotal = (harga * jml) + ppnRp - disknRp;
+      return { ...item, harga, jml, diskon, ppnMode, ppnRp, disknRp, subtotal };
+    });
+
+    const promoResult = await promoHelper.hitungPromo(conn, {
+      idpromo, idtenant: ctx.idtenant, tgltrans,
+      berlaku_untuk: 'PEMBELIAN', items: baseItems,
+    });
+
     // 2. Insert Header Pembelian (Beli)
-    const queryInsertHeader = `
-      INSERT INTO beli (idtenant, idlokasi, kodebeli, tgltrans, idsupplier, iduser, grandtotal, bayar, jenistransaksi, idbpb, kodebpb, jalurpembelian, is_lunaslangsung, status, userentry)
-      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-    await conn.query(queryInsertHeader, [
-      ctx.idtenant, idlokasi, kodebeli, tgltrans, idsupplier, ctx.iduser, 0, jenistransaksi, idbpb, kodebpb, jalurpembelian, langsungLunas ? 1 : 0, statusBeli, ctx.iduser
-    ]);
+    await conn.query(
+      `INSERT INTO beli (idtenant, idlokasi, kodebeli, tgltrans, idsupplier, iduser, grandtotal, bayar, jenistransaksi, idbpb, kodebpb, jalurpembelian, is_lunaslangsung, idpromo, diskon_promo, status, userentry)
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+      [ctx.idtenant, idlokasi, kodebeli, tgltrans, idsupplier, ctx.iduser, 0, jenistransaksi, idbpb, kodebpb, jalurpembelian, langsungLunas ? 1 : 0, idpromo, statusBeli, ctx.iduser]
+    );
 
     // Ambil ID Header yang baru dibuat
     const [[header]] = await conn.query('SELECT idbeli FROM beli WHERE kodebeli = ? AND idtenant = ?', [kodebeli, ctx.idtenant]);
     const idbeli     = header.idbeli;
 
     // 3. Proses Detail Items & Kartu Stok
-    for (const item of items) {
-      const harga   = parseFloat(item.harga);
-      const jml     = parseInt(item.jml) || 1;
-      const diskon  = parseFloat(item.diskon) || 0;
-      
-      // Hitung PPN & Subtotal
-      const ppnMode = item.ppn_mode || 'INCLUDE';
-      const ppnRp   = ppnMode === 'INCLUDE' ? (harga * jml * ppnPercent) / 100 : 0;
-      const disknRp = (harga * jml * diskon) / 100;
-      const subTtl  = (harga * jml) + ppnRp - disknRp;
-      
+    for (const item of baseItems) {
+      const { harga, jml, diskon, ppnRp, subtotal } = item;
+      const isGratis        = item.is_gratis ? 1 : 0;
+      const itemIdpromo     = idpromo && promoResult.itemDiskonPromo.has(parseInt(item.idbarang)) ? idpromo : null;
+      const diskonPromoItem = promoResult.itemDiskonPromo.get(parseInt(item.idbarang)) || 0;
+      const subTtl          = isGratis ? 0 : (subtotal - diskonPromoItem);
+
       grandTotal += subTtl;
 
-      // Insert Detail Pembelian
-      const queryInsertDetail = `
-        INSERT INTO belidtl (idbeli, idtenant, idbarang, jml, harga, ppn, diskon, subtotal, satuan) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `;
-      await conn.query(queryInsertDetail, [
-        idbeli, ctx.idtenant, item.idbarang, jml, harga, ppnRp, diskon, subTtl, item.satuan || null
-      ]);
+      await conn.query(
+        'INSERT INTO belidtl (idbeli, idtenant, idbarang, jml, harga, ppn, diskon, subtotal, satuan, idpromo, diskon_promo, is_gratis) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [idbeli, ctx.idtenant, item.idbarang, jml, isGratis ? 0 : harga, isGratis ? 0 : ppnRp, isGratis ? 0 : diskon, subTtl, item.satuan || null, itemIdpromo, diskonPromoItem, isGratis]
+      );
 
       if (approve) {
         // Ambil Info Barang untuk Konversi Stok & Insert Kartu Stok
         const [[barangInfo]] = await conn.query('SELECT satuanbesar, satuansedang, satuankecil, konversi1, konversi2 FROM barang WHERE idbarang = ? AND idtenant = ?', [item.idbarang, ctx.idtenant]);
         const jmlStokKecil   = barangInfo ? toKecilJml(jml, item.satuan, barangInfo) : jml;
 
-        const queryInsertStok = `
-          INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi) 
-          VALUES (?, ?, ?, ?, ?, 'M', ?, ?, ?, 'BELI')
-        `;
-        await conn.query(queryInsertStok, [
-          ctx.idtenant, idlokasi, kodebeli, item.idbarang, jmlStokKecil, tgltrans, `Pembelian ${kodebeli}`, idbeli
-        ]);
+        await conn.query(
+          `INSERT INTO kartustok (idtenant, idlokasi, kodetrans, idbarang, jml, jenis, tgltrans, keterangan, idtrans, jenistransaksi)
+           VALUES (?, ?, ?, ?, ?, 'M', ?, ?, ?, 'BELI')`,
+          [ctx.idtenant, idlokasi, kodebeli, item.idbarang, jmlStokKecil, tgltrans, `Pembelian ${kodebeli}`, idbeli]
+        );
 
-        // Update History Harga Beli (Jika Berubah)
-        const [[latestHarga]] = await conn.query("SELECT hargabeli FROM hargabeli WHERE idbarang = ? AND idtenant = ? AND status = 'AKTIF' ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1", [item.idbarang, ctx.idtenant]);
-        if (!latestHarga || parseFloat(latestHarga.hargabeli) !== harga) {
-          await conn.query('INSERT INTO hargabeli (idtenant, idbarang, hargabeli, tgltrans, idref, koderef, jenisref, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [ctx.idtenant, item.idbarang, harga, tgltrans, idbeli, kodebeli, 'BELI', 'AKTIF']);
+        if (!isGratis) {
+          // Update History Harga Beli (Jika Berubah)
+          const [[latestHarga]] = await conn.query("SELECT hargabeli FROM hargabeli WHERE idbarang = ? AND idtenant = ? AND status = 'AKTIF' ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1", [item.idbarang, ctx.idtenant]);
+          if (!latestHarga || parseFloat(latestHarga.hargabeli) !== harga) {
+            await conn.query('INSERT INTO hargabeli (idtenant, idbarang, hargabeli, tgltrans, idref, koderef, jenisref, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [ctx.idtenant, item.idbarang, harga, tgltrans, idbeli, kodebeli, 'BELI', 'AKTIF']);
+          }
         }
       }
     }
 
-    // 4. Update Grandtotal di Header
+    // 4. Update Grandtotal di Header (dikurangi diskon promo transaksi)
+    grandTotal = Math.max(0, grandTotal - promoResult.diskonPromoTransaksi);
     const bayarFinal = approve && langsungLunas ? grandTotal : 0;
-    await conn.query('UPDATE beli SET grandtotal = ?, bayar = ? WHERE idbeli = ?', [grandTotal, bayarFinal, idbeli]);
+    await conn.query('UPDATE beli SET grandtotal = ?, bayar = ?, diskon_promo = ? WHERE idbeli = ?', [grandTotal, bayarFinal, promoResult.diskonPromoTransaksi, idbeli]);
 
     // 5. Catat Kartu Hutang
     const queryInsertHutang = `
@@ -249,10 +259,13 @@ exports.create = async (req, res) => {
     if (idbpb) {
       await conn.query("UPDATE bpb SET status = 'CONFIRMED' WHERE idbpb = ? AND idtenant = ?", [idbpb, ctx.idtenant]);
     }
+    if (approve && idpromo) {
+      await promoHelper.incrementPromoUsage(conn, { idpromo, idtenant: ctx.idtenant });
+    }
     await conn.commit();
 
     await logger.history('BELI_CREATE', { idtenant: ctx.idtenant, idlokasi, iduser: ctx.iduser, ref: kodebeli, detail: { grandtotal: grandTotal, status: statusBeli }, req });
-    
+
     res.status(201).json({ message: 'Pembelian berhasil', kodebeli, idbeli, grandtotal: grandTotal });
   } catch (err) {
     await conn.rollback();
@@ -383,6 +396,7 @@ exports.update = async (req, res) => {
     const approve        = req.body.approve === true || req.body.status === 'APPROVED';
     const newIdbpb       = req.body.idbpb   || null;
     const newKodebpb     = req.body.kodebpb || null;
+    const newIdpromo     = req.body.idpromo  || null;
     const jalurpembelian = newIdbpb ? 'PESANAN' : (req.body.jalurpembelian || 'LANGSUNG');
 
     if (!items || !items.length) {
@@ -446,8 +460,8 @@ exports.update = async (req, res) => {
 
     // 3. Update Header Beli (TERMASUK UPDATE LOKASI & SUPPLIER)
     await conn.query(
-      'UPDATE beli SET tgltrans = ?, idlokasi = ?, idsupplier = ?, jenistransaksi = ?, idbpb = ?, kodebpb = ?, jalurpembelian = ?, is_lunaslangsung = ?, status = ? WHERE idbeli = ? AND idtenant = ?',
-      [tgltrans, idlokasi, newIdsupplier, jenistransaksi, newIdbpb, newKodebpb, jalurpembelian, langsungLunas ? 1 : 0, statusBeli, id, ctx.idtenant]
+      'UPDATE beli SET tgltrans = ?, idlokasi = ?, idsupplier = ?, jenistransaksi = ?, idbpb = ?, kodebpb = ?, jalurpembelian = ?, is_lunaslangsung = ?, idpromo = ?, status = ? WHERE idbeli = ? AND idtenant = ?',
+      [tgltrans, idlokasi, newIdsupplier, jenistransaksi, newIdbpb, newKodebpb, jalurpembelian, langsungLunas ? 1 : 0, newIdpromo, statusBeli, id, ctx.idtenant]
     );
 
     // 4. Proses Rekonstruksi Detail Items & Stok
@@ -455,22 +469,36 @@ exports.update = async (req, res) => {
     const ppnPercent = tenant ? parseFloat(tenant.ppn) : 11;
     let grandTotal   = 0;
 
-    for (const item of items) {
+    // Hitung promo
+    const baseItems = items.map(item => {
       const harga   = parseFloat(item.harga);
-      const jml     = parseInt(item.jml) || 1;
+      const jml     = parseFloat(item.jml) || 1;
       const diskon  = parseFloat(item.diskon) || 0;
-      
       const ppnMode = item.ppn_mode || 'INCLUDE';
       const ppnRp   = ppnMode === 'INCLUDE' ? (harga * jml * ppnPercent) / 100 : 0;
       const disknRp = (harga * jml * diskon) / 100;
-      const subTtl  = (harga * jml) + ppnRp - disknRp;
-      
+      const subtotal = (harga * jml) + ppnRp - disknRp;
+      return { ...item, harga, jml, diskon, ppnMode, ppnRp, disknRp, subtotal };
+    });
+
+    const promoResult = await promoHelper.hitungPromo(conn, {
+      idpromo: newIdpromo, idtenant: ctx.idtenant, tgltrans,
+      berlaku_untuk: 'PEMBELIAN', items: baseItems,
+    });
+
+    for (const item of baseItems) {
+      const { harga, jml, diskon, ppnRp, subtotal } = item;
+      const isGratis        = item.is_gratis ? 1 : 0;
+      const itemIdpromo     = newIdpromo && promoResult.itemDiskonPromo.has(parseInt(item.idbarang)) ? newIdpromo : null;
+      const diskonPromoItem = promoResult.itemDiskonPromo.get(parseInt(item.idbarang)) || 0;
+      const subTtl          = isGratis ? 0 : (subtotal - diskonPromoItem);
+
       grandTotal += subTtl;
 
       // Insert Detail Baru
       await conn.query(
-        'INSERT INTO belidtl (idbeli, idtenant, idbarang, jml, harga, ppn, diskon, subtotal, satuan) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [id, ctx.idtenant, item.idbarang, jml, harga, ppnRp, diskon, subTtl, item.satuan || null]
+        'INSERT INTO belidtl (idbeli, idtenant, idbarang, jml, harga, ppn, diskon, subtotal, satuan, idpromo, diskon_promo, is_gratis) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [id, ctx.idtenant, item.idbarang, jml, isGratis ? 0 : harga, isGratis ? 0 : ppnRp, isGratis ? 0 : diskon, subTtl, item.satuan || null, itemIdpromo, diskonPromoItem, isGratis]
       );
 
       if (approve) {
@@ -483,17 +511,20 @@ exports.update = async (req, res) => {
           [ctx.idtenant, idlokasi, kodebeli, item.idbarang, jmlStokKecil, 'M', tgltrans, `Pembelian ${kodebeli}`, id, 'BELI']
         );
 
-        // Update History Harga
-        const [[latestHarga]] = await conn.query("SELECT hargabeli FROM hargabeli WHERE idbarang = ? AND idtenant = ? AND status = 'AKTIF' ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1", [item.idbarang, ctx.idtenant]);
-        if (!latestHarga || parseFloat(latestHarga.hargabeli) !== harga) {
-          await conn.query('INSERT INTO hargabeli (idtenant, idbarang, hargabeli, tgltrans, idref, koderef, jenisref, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [ctx.idtenant, item.idbarang, harga, tgltrans, id, kodebeli, 'BELI', 'AKTIF']);
+        if (!isGratis) {
+          // Update History Harga
+          const [[latestHarga]] = await conn.query("SELECT hargabeli FROM hargabeli WHERE idbarang = ? AND idtenant = ? AND status = 'AKTIF' ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1", [item.idbarang, ctx.idtenant]);
+          if (!latestHarga || parseFloat(latestHarga.hargabeli) !== harga) {
+            await conn.query('INSERT INTO hargabeli (idtenant, idbarang, hargabeli, tgltrans, idref, koderef, jenisref, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [ctx.idtenant, item.idbarang, harga, tgltrans, id, kodebeli, 'BELI', 'AKTIF']);
+          }
         }
       }
     }
 
     // 5. Update Ulang Grandtotal di Header
+    grandTotal = Math.max(0, grandTotal - promoResult.diskonPromoTransaksi);
     const bayarFinal = approve && langsungLunas ? grandTotal : 0;
-    await conn.query('UPDATE beli SET grandtotal = ?, bayar = ? WHERE idbeli = ? AND idtenant = ?', [grandTotal, bayarFinal, id, ctx.idtenant]);
+    await conn.query('UPDATE beli SET grandtotal = ?, bayar = ?, diskon_promo = ? WHERE idbeli = ? AND idtenant = ?', [grandTotal, bayarFinal, promoResult.diskonPromoTransaksi, id, ctx.idtenant]);
 
     // 6. Buat Ulang Kartu Hutang dengan supplier dan lokasi terbaru
     if (approve) {
@@ -548,10 +579,13 @@ exports.update = async (req, res) => {
     if (newIdbpb) {
       await conn.query("UPDATE bpb SET status = 'CONFIRMED' WHERE idbpb = ? AND idtenant = ?", [newIdbpb, ctx.idtenant]);
     }
+    if (approve && newIdpromo) {
+      await promoHelper.incrementPromoUsage(conn, { idpromo: newIdpromo, idtenant: ctx.idtenant });
+    }
     await conn.commit();
 
     await logger.history('BELI_UPDATE', { idtenant: ctx.idtenant, idlokasi, iduser: ctx.iduser, ref: kodebeli, detail: { status: statusBeli }, req });
-    
+
     res.json({ message: 'Pembelian berhasil diupdate', grandtotal: grandTotal });
   } catch (err) {
     await conn.rollback();
@@ -712,6 +746,9 @@ exports.approve = async (req, res) => {
     if (beli.idbpb) {
       await conn.query("UPDATE bpb SET status = 'CONFIRMED' WHERE idbpb = ? AND idtenant = ?", [beli.idbpb, ctx.idtenant]);
     }
+    if (beli.idpromo) {
+      await promoHelper.incrementPromoUsage(conn, { idpromo: beli.idpromo, idtenant: ctx.idtenant });
+    }
 
     await conn.commit();
     await logger.history('BELI_APPROVE', { idtenant: ctx.idtenant, idlokasi: beli.idlokasi, iduser: ctx.iduser, ref: beli.kodebeli, req });
@@ -763,6 +800,9 @@ exports.unapprove = async (req, res) => {
       });
     }
 
+    if (beli.idpromo) {
+      await promoHelper.decrementPromoUsage(conn, { idpromo: beli.idpromo, idtenant: ctx.idtenant });
+    }
     await deletePostedBeli(conn, { idtenant: ctx.idtenant, beli });
     await conn.query("UPDATE beli SET status = 'DRAFT', bayar = 0 WHERE idbeli = ? AND idtenant = ?", [id, ctx.idtenant]);
 

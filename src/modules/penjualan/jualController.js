@@ -1,6 +1,7 @@
 const { tenantQuery, getConnection, getTenantContext } = require('../../config/db');
 const { generateKodeJual, generateKodePelunasanPiutang } = require('../../lib/kodetrans');
 const jurnalhelper = require('../../lib/jurnalhelper');
+const promoHelper = require('../../lib/promoHelper');
 const logger = require('../../lib/logger');
 
 function toKecilJml(jml, satuan, barang) {
@@ -118,6 +119,7 @@ exports.create = async (req, res) => {
     const approve        = req.body.approve === true || req.body.status === 'APPROVED';
     const idbpk          = req.body.idbpk || null;
     const kodebpk        = req.body.kodebpk || null;
+    const idpromo        = req.body.idpromo || null;
     const jalurpenjualan = idbpk ? 'PESANAN' : (req.body.jalurpenjualan || 'LANGSUNG');
     const jenistransaksi = `${jalurpenjualan === 'PESANAN' ? 'PENJUALAN PESANAN' : 'PENJUALAN LANGSUNG'}${langsungLunas ? ' LUNAS' : ''}`;
     const statusJual     = approve ? 'APPROVED' : 'DRAFT';
@@ -132,28 +134,42 @@ exports.create = async (req, res) => {
     const ppnPercent  = tenant ? parseFloat(tenant.ppn) : 11;
     let   grandTotal  = 0;
 
-    const [headerResult] = await conn.query(
-      `INSERT INTO jual (idtenant, idlokasi, kodejual, tgltrans, idcustomer, iduser, grandtotal, bayar, jenistransaksi, idbpk, kodebpk, jalurpenjualan, is_lunaslangsung, status, userentry)
-       VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?)`,
-      [ctx.idtenant, idlokasi, kodejual, tgltrans, idcustomer, ctx.iduser, jenistransaksi, idbpk, kodebpk, jalurpenjualan, langsungLunas ? 1 : 0, statusJual, ctx.iduser]
-    );
-    const idjual = headerResult.insertId;
-
-    for (const item of items) {
+    // Hitung promo (jika ada)
+    const baseItems = items.map(item => {
       const harga   = parseFloat(item.harga);
       const jml     = parseFloat(item.jml) || 1;
       const diskon  = parseFloat(item.diskon) || 0;
-
       const ppnMode = item.ppn_mode || 'INCLUDE';
       const ppnRp   = ppnMode === 'INCLUDE' ? (harga * jml * ppnPercent) / 100 : 0;
       const disknRp = (harga * jml * diskon) / 100;
-      const subTtl  = (harga * jml) + ppnRp - disknRp;
+      const subtotal = (harga * jml) + ppnRp - disknRp;
+      return { ...item, harga, jml, diskon, ppnMode, ppnRp, disknRp, subtotal };
+    });
+
+    const promoResult = await promoHelper.hitungPromo(conn, {
+      idpromo, idtenant: ctx.idtenant, tgltrans,
+      berlaku_untuk: 'PENJUALAN', items: baseItems,
+    });
+
+    const [headerResult] = await conn.query(
+      `INSERT INTO jual (idtenant, idlokasi, kodejual, tgltrans, idcustomer, iduser, grandtotal, bayar, jenistransaksi, idbpk, kodebpk, jalurpenjualan, is_lunaslangsung, idpromo, diskon_promo, status, userentry)
+       VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+      [ctx.idtenant, idlokasi, kodejual, tgltrans, idcustomer, ctx.iduser, jenistransaksi, idbpk, kodebpk, jalurpenjualan, langsungLunas ? 1 : 0, idpromo, statusJual, ctx.iduser]
+    );
+    const idjual = headerResult.insertId;
+
+    for (const item of baseItems) {
+      const { harga, jml, diskon, ppnRp, subtotal } = item;
+      const isGratis  = item.is_gratis ? 1 : 0;
+      const itemIdpromo = idpromo && promoResult.itemDiskonPromo.has(parseInt(item.idbarang)) ? idpromo : null;
+      const diskonPromoItem = promoResult.itemDiskonPromo.get(parseInt(item.idbarang)) || 0;
+      const subTtl  = isGratis ? 0 : (subtotal - diskonPromoItem);
 
       grandTotal += subTtl;
 
       await conn.query(
-        'INSERT INTO jualdtl (idjual, idtenant, idbarang, jml, harga, ppn, diskon, subtotal, satuan) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [idjual, ctx.idtenant, item.idbarang, jml, harga, ppnRp, diskon, subTtl, item.satuan || null]
+        'INSERT INTO jualdtl (idjual, idtenant, idbarang, jml, harga, ppn, diskon, subtotal, satuan, idpromo, diskon_promo, is_gratis) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [idjual, ctx.idtenant, item.idbarang, jml, isGratis ? 0 : harga, isGratis ? 0 : ppnRp, isGratis ? 0 : diskon, subTtl, item.satuan || null, itemIdpromo, diskonPromoItem, isGratis]
       );
 
       if (approve) {
@@ -165,15 +181,20 @@ exports.create = async (req, res) => {
           [ctx.idtenant, idlokasi, kodejual, item.idbarang, jmlStokKecil, 'K', tgltrans, `Penjualan ${kodejual}`, idjual, 'JUAL']
         );
 
-        const [[latestHarga]] = await conn.query("SELECT hargajual FROM hargajual WHERE idbarang = ? AND idtenant = ? AND status = 'AKTIF' ORDER BY tgltrans DESC, idhargajual DESC LIMIT 1", [item.idbarang, ctx.idtenant]);
-        if (!latestHarga || parseFloat(latestHarga.hargajual) !== harga) {
-          await conn.query('INSERT INTO hargajual (idtenant, idbarang, hargajual, tgltrans, idref, koderef, jenisref, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [ctx.idtenant, item.idbarang, harga, tgltrans, idjual, kodejual, 'JUAL', 'AKTIF']);
+        if (!isGratis) {
+          const [[latestHarga]] = await conn.query("SELECT hargajual FROM hargajual WHERE idbarang = ? AND idtenant = ? AND status = 'AKTIF' ORDER BY tgltrans DESC, idhargajual DESC LIMIT 1", [item.idbarang, ctx.idtenant]);
+          if (!latestHarga || parseFloat(latestHarga.hargajual) !== harga) {
+            await conn.query('INSERT INTO hargajual (idtenant, idbarang, hargajual, tgltrans, idref, koderef, jenisref, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [ctx.idtenant, item.idbarang, harga, tgltrans, idjual, kodejual, 'JUAL', 'AKTIF']);
+          }
         }
       }
     }
 
+    // Kurangi grandtotal dengan diskon promo per transaksi
+    grandTotal = Math.max(0, grandTotal - promoResult.diskonPromoTransaksi);
+
     const bayarFinal = approve && langsungLunas ? grandTotal : 0;
-    await conn.query('UPDATE jual SET grandtotal = ?, bayar = ? WHERE idjual = ?', [grandTotal, bayarFinal, idjual]);
+    await conn.query('UPDATE jual SET grandtotal = ?, bayar = ?, diskon_promo = ? WHERE idjual = ?', [grandTotal, bayarFinal, promoResult.diskonPromoTransaksi, idjual]);
 
     if (approve) {
       await conn.query(
@@ -209,6 +230,9 @@ exports.create = async (req, res) => {
 
     if (idbpk) {
       await conn.query("UPDATE bpk SET status = 'CONFIRMED' WHERE idbpk = ? AND idtenant = ?", [idbpk, ctx.idtenant]);
+    }
+    if (approve && idpromo) {
+      await promoHelper.incrementPromoUsage(conn, { idpromo, idtenant: ctx.idtenant });
     }
     await conn.commit();
 
@@ -328,6 +352,7 @@ exports.update = async (req, res) => {
     const approve        = req.body.approve === true || req.body.status === 'APPROVED';
     const newIdbpk       = req.body.idbpk || null;
     const newKodebpk     = req.body.kodebpk || null;
+    const newIdpromo     = req.body.idpromo || null;
     const jalurpenjualan = newIdbpk ? 'PESANAN' : (req.body.jalurpenjualan || 'LANGSUNG');
 
     if (!items || !items.length) {
@@ -380,29 +405,43 @@ exports.update = async (req, res) => {
     await conn.query('DELETE FROM jualdtl WHERE idjual = ? AND idtenant = ?', [id, ctx.idtenant]);
 
     await conn.query(
-      'UPDATE jual SET tgltrans = ?, idlokasi = ?, idcustomer = ?, jenistransaksi = ?, idbpk = ?, kodebpk = ?, jalurpenjualan = ?, is_lunaslangsung = ?, status = ? WHERE idjual = ? AND idtenant = ?',
-      [tgltrans, idlokasi, newIdcustomer, jenistransaksi, newIdbpk, newKodebpk, jalurpenjualan, langsungLunas ? 1 : 0, statusJual, id, ctx.idtenant]
+      'UPDATE jual SET tgltrans = ?, idlokasi = ?, idcustomer = ?, jenistransaksi = ?, idbpk = ?, kodebpk = ?, jalurpenjualan = ?, is_lunaslangsung = ?, idpromo = ?, status = ? WHERE idjual = ? AND idtenant = ?',
+      [tgltrans, idlokasi, newIdcustomer, jenistransaksi, newIdbpk, newKodebpk, jalurpenjualan, langsungLunas ? 1 : 0, newIdpromo, statusJual, id, ctx.idtenant]
     );
 
     const [[tenant]] = await conn.query('SELECT ppn FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
     const ppnPercent = tenant ? parseFloat(tenant.ppn) : 11;
     let grandTotal   = 0;
 
-    for (const item of items) {
+    // Hitung promo
+    const baseItems = items.map(item => {
       const harga   = parseFloat(item.harga);
       const jml     = parseFloat(item.jml) || 1;
       const diskon  = parseFloat(item.diskon) || 0;
-
       const ppnMode = item.ppn_mode || 'INCLUDE';
       const ppnRp   = ppnMode === 'INCLUDE' ? (harga * jml * ppnPercent) / 100 : 0;
       const disknRp = (harga * jml * diskon) / 100;
-      const subTtl  = (harga * jml) + ppnRp - disknRp;
+      const subtotal = (harga * jml) + ppnRp - disknRp;
+      return { ...item, harga, jml, diskon, ppnMode, ppnRp, disknRp, subtotal };
+    });
+
+    const promoResult = await promoHelper.hitungPromo(conn, {
+      idpromo: newIdpromo, idtenant: ctx.idtenant, tgltrans,
+      berlaku_untuk: 'PENJUALAN', items: baseItems,
+    });
+
+    for (const item of baseItems) {
+      const { harga, jml, diskon, ppnRp, subtotal } = item;
+      const isGratis    = item.is_gratis ? 1 : 0;
+      const itemIdpromo = newIdpromo && promoResult.itemDiskonPromo.has(parseInt(item.idbarang)) ? newIdpromo : null;
+      const diskonPromoItem = promoResult.itemDiskonPromo.get(parseInt(item.idbarang)) || 0;
+      const subTtl      = isGratis ? 0 : (subtotal - diskonPromoItem);
 
       grandTotal += subTtl;
 
       await conn.query(
-        'INSERT INTO jualdtl (idjual, idtenant, idbarang, jml, harga, ppn, diskon, subtotal, satuan) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [id, ctx.idtenant, item.idbarang, jml, harga, ppnRp, diskon, subTtl, item.satuan || null]
+        'INSERT INTO jualdtl (idjual, idtenant, idbarang, jml, harga, ppn, diskon, subtotal, satuan, idpromo, diskon_promo, is_gratis) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [id, ctx.idtenant, item.idbarang, jml, isGratis ? 0 : harga, isGratis ? 0 : ppnRp, isGratis ? 0 : diskon, subTtl, item.satuan || null, itemIdpromo, diskonPromoItem, isGratis]
       );
 
       if (approve) {
@@ -414,15 +453,19 @@ exports.update = async (req, res) => {
           [ctx.idtenant, idlokasi, kodejual, item.idbarang, jmlStokKecil, 'K', tgltrans, `Penjualan ${kodejual}`, id, 'JUAL']
         );
 
-        const [[latestHarga]] = await conn.query("SELECT hargajual FROM hargajual WHERE idbarang = ? AND idtenant = ? AND status = 'AKTIF' ORDER BY tgltrans DESC, idhargajual DESC LIMIT 1", [item.idbarang, ctx.idtenant]);
-        if (!latestHarga || parseFloat(latestHarga.hargajual) !== harga) {
-          await conn.query('INSERT INTO hargajual (idtenant, idbarang, hargajual, tgltrans, idref, koderef, jenisref, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [ctx.idtenant, item.idbarang, harga, tgltrans, id, kodejual, 'JUAL', 'AKTIF']);
+        if (!isGratis) {
+          const [[latestHarga]] = await conn.query("SELECT hargajual FROM hargajual WHERE idbarang = ? AND idtenant = ? AND status = 'AKTIF' ORDER BY tgltrans DESC, idhargajual DESC LIMIT 1", [item.idbarang, ctx.idtenant]);
+          if (!latestHarga || parseFloat(latestHarga.hargajual) !== harga) {
+            await conn.query('INSERT INTO hargajual (idtenant, idbarang, hargajual, tgltrans, idref, koderef, jenisref, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [ctx.idtenant, item.idbarang, harga, tgltrans, id, kodejual, 'JUAL', 'AKTIF']);
+          }
         }
       }
     }
 
+    grandTotal = Math.max(0, grandTotal - promoResult.diskonPromoTransaksi);
+
     const bayarFinal = approve && langsungLunas ? grandTotal : 0;
-    await conn.query('UPDATE jual SET grandtotal = ?, bayar = ? WHERE idjual = ? AND idtenant = ?', [grandTotal, bayarFinal, id, ctx.idtenant]);
+    await conn.query('UPDATE jual SET grandtotal = ?, bayar = ?, diskon_promo = ? WHERE idjual = ? AND idtenant = ?', [grandTotal, bayarFinal, promoResult.diskonPromoTransaksi, id, ctx.idtenant]);
 
     if (approve) {
       await conn.query(
@@ -458,6 +501,9 @@ exports.update = async (req, res) => {
 
     if (newIdbpk) {
       await conn.query("UPDATE bpk SET status = 'CONFIRMED' WHERE idbpk = ? AND idtenant = ?", [newIdbpk, ctx.idtenant]);
+    }
+    if (approve && newIdpromo) {
+      await promoHelper.incrementPromoUsage(conn, { idpromo: newIdpromo, idtenant: ctx.idtenant });
     }
     await conn.commit();
 
@@ -616,6 +662,9 @@ exports.approve = async (req, res) => {
     if (jual.idbpk) {
       await conn.query("UPDATE bpk SET status = 'CONFIRMED' WHERE idbpk = ? AND idtenant = ?", [jual.idbpk, ctx.idtenant]);
     }
+    if (jual.idpromo) {
+      await promoHelper.incrementPromoUsage(conn, { idpromo: jual.idpromo, idtenant: ctx.idtenant });
+    }
 
     await conn.commit();
     await logger.history('JUAL_APPROVE', { idtenant: ctx.idtenant, idlokasi: jual.idlokasi, iduser: ctx.iduser, ref: jual.kodejual, req });
@@ -667,6 +716,9 @@ exports.unapprove = async (req, res) => {
       });
     }
 
+    if (jual.idpromo) {
+      await promoHelper.decrementPromoUsage(conn, { idpromo: jual.idpromo, idtenant: ctx.idtenant });
+    }
     await deletePostedJual(conn, { idtenant: ctx.idtenant, jual });
     await conn.query("UPDATE jual SET status = 'DRAFT', bayar = 0 WHERE idjual = ? AND idtenant = ?", [id, ctx.idtenant]);
 
