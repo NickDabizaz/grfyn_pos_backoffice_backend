@@ -28,5 +28,8 @@ router.get('/retur-jual', auth, ctrl.returJual);
 router.get('/purchase-order', auth, ctrl.purchaseOrder);
 router.get('/bpb', auth, ctrl.bpb);
 router.get('/retur-beli', auth, ctrl.returBeli);
+router.get('/absen', auth, ctrl.absen);
+router.get('/gaji', auth, ctrl.gaji);
+router.get('/slip-gaji/:id', auth, ctrl.slipGaji);
 
 module.exports = router;

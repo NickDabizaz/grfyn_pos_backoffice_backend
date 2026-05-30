@@ -1948,3 +1948,185 @@ exports.faktur = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+exports.absen = async (req, res) => {
+  try {
+    const ctx = getTenantContext();
+    const { tglwal, tglakhir, idlokasi, format = 'json' } = req.query;
+    let sql = `SELECT a.kodeabsen, a.tgltrans, a.status, l.kodelokasi, l.namalokasi,
+        ad.jenis, ad.catatan, k.kodekaryawan, k.namakaryawan
+      FROM absen a
+      JOIN absendtl ad ON ad.idabsen = a.idabsen AND ad.idtenant = a.idtenant
+      JOIN karyawan k ON k.idkaryawan = ad.idkaryawan AND k.idtenant = ad.idtenant
+      JOIN lokasi l ON l.idlokasi = a.idlokasi AND l.idtenant = a.idtenant
+      WHERE a.idtenant = ? AND a.status IN ('APPROVED','CONFIRMED')`;
+    const params = [ctx.idtenant];
+    if (idlokasi) { const r = multiIdIn('a.idlokasi', idlokasi); if (r.clause) { sql += ' AND ' + r.clause; params.push(...r.params); } }
+    if (tglwal) { sql += ' AND a.tgltrans >= ?'; params.push(tglwal); }
+    if (tglakhir) { sql += ' AND a.tgltrans <= ?'; params.push(tglakhir); }
+    sql += ' ORDER BY a.tgltrans ASC, a.kodeabsen ASC, k.namakaryawan ASC';
+
+    const rows = await tenantQuery(sql, params);
+    const groups = [];
+    let currentKey = null;
+    let current = null;
+    for (const row of rows) {
+      const tgl = row.tgltrans && row.tgltrans.toISOString ? row.tgltrans.toISOString().slice(0, 10) : String(row.tgltrans).slice(0, 10);
+      const key = `${tgl}|${row.kodeabsen}`;
+      if (key !== currentKey) {
+        currentKey = key;
+        current = {
+          kodeabsen: row.kodeabsen,
+          tgltrans: tgl,
+          status: row.status,
+          namalokasi: row.namalokasi,
+          kodelokasi: row.kodelokasi,
+          items: [],
+        };
+        groups.push(current);
+      }
+      current.items.push({
+        kodekaryawan: row.kodekaryawan,
+        namakaryawan: row.namakaryawan,
+        jenis: row.jenis,
+        catatan: row.catatan,
+      });
+    }
+
+    if (format === 'html') {
+      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      const [[lokasi]] = await pool.query('SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?', [ctx.idlokasi, ctx.idtenant]);
+      return res.render('laporan_absen', {
+        groups,
+        totalTransaksi: groups.length,
+        totalDetail: rows.length,
+        tglwal: tglwal || '-',
+        tglakhir: tglakhir || '-',
+        namatoko: tenant?.namatenant || 'Grfyn POS',
+        alamat: lokasi?.alamat || '',
+        hp: lokasi?.hp || '',
+        logo: tenant?.logo || '',
+        tglcetak: new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
+      });
+    }
+
+    res.json({ groups, totalTransaksi: groups.length, totalDetail: rows.length });
+  } catch (err) {
+    logger.error(err, { req });
+    res.status(500).json({ message: err.message });
+  }
+};
+
+exports.gaji = async (req, res) => {
+  try {
+    const ctx = getTenantContext();
+    const { tglwal, tglakhir, idlokasi, format = 'json' } = req.query;
+    let sql = `SELECT g.kodegaji, g.periodbulan, g.tglawal, g.tglakhir, g.status,
+        g.totalgaji, g.totalbonus, g.total, g.totalcash, g.totalbank,
+        l.kodelokasi, l.namalokasi,
+        gd.gaji AS detailgaji, gd.bonus, gd.total AS detailtotal, gd.bayarcash, gd.bayarbank,
+        gd.totalabsen, gd.totalpotongabsen, gd.catatan,
+        k.kodekaryawan, k.namakaryawan
+      FROM gaji g
+      JOIN gajidtl gd ON gd.idgaji = g.idgaji AND gd.idtenant = g.idtenant
+      JOIN karyawan k ON k.idkaryawan = gd.idkaryawan AND k.idtenant = gd.idtenant
+      JOIN lokasi l ON l.idlokasi = g.idlokasi AND l.idtenant = g.idtenant
+      WHERE g.idtenant = ? AND g.status IN ('APPROVED','CONFIRMED')`;
+    const params = [ctx.idtenant];
+    if (idlokasi) { const r = multiIdIn('g.idlokasi', idlokasi); if (r.clause) { sql += ' AND ' + r.clause; params.push(...r.params); } }
+    if (tglwal) { sql += ' AND g.tglakhir >= ?'; params.push(tglwal); }
+    if (tglakhir) { sql += ' AND g.tglawal <= ?'; params.push(tglakhir); }
+    sql += ' ORDER BY g.periodbulan ASC, g.kodegaji ASC, k.namakaryawan ASC';
+
+    const rows = await tenantQuery(sql, params);
+    const groups = [];
+    let currentKey = null;
+    let current = null;
+    for (const row of rows) {
+      if (row.kodegaji !== currentKey) {
+        currentKey = row.kodegaji;
+        current = {
+          kodegaji: row.kodegaji,
+          periodbulan: row.periodbulan,
+          status: row.status,
+          namalokasi: row.namalokasi,
+          kodelokasi: row.kodelokasi,
+          totalgaji: Number(row.totalgaji || 0),
+          totalbonus: Number(row.totalbonus || 0),
+          total: Number(row.total || 0),
+          totalcash: Number(row.totalcash || 0),
+          totalbank: Number(row.totalbank || 0),
+          items: [],
+        };
+        groups.push(current);
+      }
+      current.items.push({
+        kodekaryawan: row.kodekaryawan,
+        namakaryawan: row.namakaryawan,
+        gaji: Number(row.detailgaji || 0),
+        bonus: Number(row.bonus || 0),
+        total: Number(row.detailtotal || 0),
+        bayarcash: Number(row.bayarcash || 0),
+        bayarbank: Number(row.bayarbank || 0),
+        totalabsen: row.totalabsen,
+        totalpotongabsen: row.totalpotongabsen,
+        catatan: row.catatan,
+      });
+    }
+    const grandTotal = groups.reduce((s, g) => s + g.total, 0);
+
+    if (format === 'html') {
+      const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+      const [[lokasi]] = await pool.query('SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?', [ctx.idlokasi, ctx.idtenant]);
+      return res.render('laporan_gaji', {
+        groups,
+        grandTotal,
+        tglwal: tglwal || '-',
+        tglakhir: tglakhir || '-',
+        namatoko: tenant?.namatenant || 'Grfyn POS',
+        alamat: lokasi?.alamat || '',
+        hp: lokasi?.hp || '',
+        logo: tenant?.logo || '',
+        tglcetak: new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
+      });
+    }
+
+    res.json({ groups, grandTotal });
+  } catch (err) {
+    logger.error(err, { req });
+    res.status(500).json({ message: err.message });
+  }
+};
+
+exports.slipGaji = async (req, res) => {
+  try {
+    const ctx = getTenantContext();
+    const rows = await tenantQuery(
+      `SELECT g.kodegaji, g.periodbulan, g.tglawal, g.tglakhir, g.status,
+        l.kodelokasi, l.namalokasi,
+        gd.*, k.kodekaryawan, k.namakaryawan, k.email, k.hp
+       FROM gaji g
+       JOIN gajidtl gd ON gd.idgaji = g.idgaji AND gd.idtenant = g.idtenant
+       JOIN karyawan k ON k.idkaryawan = gd.idkaryawan AND k.idtenant = gd.idtenant
+       JOIN lokasi l ON l.idlokasi = g.idlokasi AND l.idtenant = g.idtenant
+       WHERE g.idgaji = ? AND g.idtenant = ?
+       ORDER BY k.namakaryawan`,
+      [req.params.id, ctx.idtenant]
+    );
+    if (!rows.length) return res.status(404).json({ message: 'Gaji tidak ditemukan' });
+
+    const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
+    const [[lokasi]] = await pool.query('SELECT * FROM lokasi WHERE idlokasi = ? AND idtenant = ?', [ctx.idlokasi, ctx.idtenant]);
+    return res.render('slip_gaji', {
+      slips: rows,
+      namatoko: tenant?.namatenant || 'Grfyn POS',
+      alamat: lokasi?.alamat || '',
+      hp: lokasi?.hp || '',
+      logo: tenant?.logo || '',
+      tglcetak: new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
+    });
+  } catch (err) {
+    logger.error(err, { req });
+    res.status(500).json({ message: err.message });
+  }
+};

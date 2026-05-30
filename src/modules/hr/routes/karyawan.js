@@ -6,12 +6,10 @@ const ctrl = require('../karyawanController');
 
 router.use(auth);
 
-router.get('/', requireAccess('sdm.karyawan', 'hakakses'), ctrl.getAll);
-router.get('/:id', requireAccess('sdm.karyawan', 'hakakses'), ctrl.getOne);
-router.post('/', requireAccess('sdm.karyawan', 'tambah'), ctrl.create);
-router.put('/:id', requireAccess('sdm.karyawan', 'ubah'), ctrl.update);
-router.delete('/:id', requireAccess('sdm.karyawan', 'tambah'), ctrl.remove);
-router.get('/:id/komponen', requireAccess('sdm.karyawan', 'hakakses'), ctrl.getKomponenGaji);
-router.post('/:id/komponen', requireAccess('sdm.karyawan', 'tambah'), ctrl.setKomponenGaji);
+router.get('/', requireAccess('master.karyawan', 'hakakses'), ctrl.getAll);
+router.get('/:id', requireAccess('master.karyawan', 'hakakses'), ctrl.getOne);
+router.post('/', requireAccess('master.karyawan', 'tambah'), ctrl.create);
+router.put('/:id', requireAccess('master.karyawan', 'ubah'), ctrl.update);
+router.delete('/:id', requireAccess('master.karyawan', 'tambah'), ctrl.remove);
 
 module.exports = router;

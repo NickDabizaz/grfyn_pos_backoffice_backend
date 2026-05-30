@@ -1,43 +1,47 @@
 # Modul HR
 
 ## Overview
-Modul Human Resources. Menangani data karyawan, absensi harian, rekap absensi bulanan, generate payroll, dan posting jurnal gaji.
+Modul Human Resources menangani master karyawan, setting jenis absensi, transaksi absensi, generate gaji, dan jurnal gaji.
 
 ## File List
 - `karyawanController.js`
+- `settingAbsensiController.js`
 - `absensiController.js`
 - `payrollController.js`
 - `routes/karyawan.js`
+- `routes/settingAbsensi.js`
 - `routes/absensi.js`
 - `routes/payroll.js`
 
 ## Endpoint Summary
 | Method | Path | Fungsi |
 |--------|------|--------|
-| CRUD | /api/karyawan | Data karyawan |
-| POST | /api/absensi | Record absensi harian |
-| GET | /api/absensi/rekap | Rekap absensi bulanan |
-| POST | /api/payroll/generate | Generate payroll per periode |
-| POST | /api/payroll/posting | Posting payroll ke jurnal |
+| CRUD | /api/karyawan | Master karyawan |
+| CRUD | /api/setting-absensi | Jenis absensi dan flag potong gaji |
+| CRUD/approve | /api/absensi | Transaksi absensi header-detail |
+| POST | /api/payroll/generate | Generate gaji per lokasi dan periode |
+| PUT | /api/payroll/:id/approve | Approve gaji dan posting jurnal |
+| PUT | /api/payroll/:id/unapprove | Batal approve gaji dan hapus jurnal |
 
 ## Business Rules
-- Absensi unik per `(idtenant, idkaryawan, tglabsensi)` → unique constraint
-- Komponen gaji: TUNJANGAN (tambah) atau POTONGAN (kurang)
-- Payroll generate: hitung dari karyawan AKTIF × komponen × hari hadir dari absensi
-- Payroll posting: insert jurnal DEBET Beban Gaji (5-1003), KREDIT Hutang Gaji (2-1002)
-- Payroll status: DRAFT → POSTED
-- Soft delete karyawan (status NONAKTIF, bukan DELETE)
+- Karyawan berada di menu Master dan wajib punya satu lokasi.
+- Jenis absensi default: HADIR, IZIN, SAKIT, CUTI, ALPHA; default hanya ALPHA memotong gaji.
+- Absensi memakai status transaksi `DRAFT`, `APPROVED`, `CONFIRMED`, `CANCELLED`.
+- Generate gaji hanya boleh satu transaksi aktif per lokasi dan periode.
+- Rumus gaji: gaji master dikurangi jumlah absensi potong gaji dikali gaji harian.
+- Approve gaji insert jurnal balance: DEBET Beban Gaji, KREDIT Kas/Bank.
+- Approve gaji mengubah absensi terkait menjadi `CONFIRMED`; batal approve mengembalikan ke `APPROVED`.
 
 ## Tabel DB Terkait
 - `karyawan`
-- `komponengaji`
-- `absensi`
-- `payroll`
-- `payrolldtl`
+- `jenisabsensi`
+- `absen`
+- `absendtl`
+- `gaji`
+- `gajidtl`
+- `gajiabsendtl`
 
 ## Dependencies
-- `lib/kodetrans` (`generateKodePayroll`, `generateKodeMaster`)
-- `modules/keuangan` (akun untuk jurnal)
-
-## Known Limitations / TODO
-- Tidak ada
+- `lib/kodetrans` (`generateKodeMaster`, `generateKodeAbsen`, `generateKodeGaji`)
+- `lib/jurnalhelper`
+- `modules/keuangan` (akun default kas/bank dan COA)

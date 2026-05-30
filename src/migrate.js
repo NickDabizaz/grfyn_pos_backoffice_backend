@@ -118,6 +118,8 @@ async function migrate() {
     'subscription_payment',
     'menutemplatedtl', 'usermenu', 'userlokasi',
     'closingdtl', 'closing',
+    'gajiabsendtl', 'gajidtl', 'gaji',
+    'absendtl', 'absen', 'jenisabsensi',
     'payrolldtl', 'payroll',
     'absensi', 'komponengaji', 'karyawan',
     'stockopnamedtl', 'stockopname',
@@ -1370,104 +1372,149 @@ async function migrate() {
     CREATE TABLE karyawan (
       idkaryawan    INT AUTO_INCREMENT PRIMARY KEY,
       idtenant      INT NOT NULL,
+      idlokasi      INT NOT NULL,
       kodekaryawan  VARCHAR(20) NOT NULL,
       namakaryawan  VARCHAR(100) NOT NULL,
-      jabatan       VARCHAR(50) DEFAULT NULL,
-      departemen    VARCHAR(50) DEFAULT NULL,
-      tgllahir      DATE DEFAULT NULL,
-      tglmasuk      DATE DEFAULT NULL,
-      gajipoko      DECIMAL(15,2) DEFAULT 0,
-      norekening    VARCHAR(50) DEFAULT NULL,
-      namabank      VARCHAR(50) DEFAULT NULL,
-      hp            VARCHAR(20) DEFAULT NULL,
       email         VARCHAR(100) DEFAULT NULL,
-      alamat        TEXT DEFAULT NULL,
+      hp            VARCHAR(20) DEFAULT NULL,
+      gaji          DECIMAL(15,2) DEFAULT 0,
       status        VARCHAR(20) DEFAULT 'AKTIF',
       userentry     INT NOT NULL DEFAULT 0,
       tglentry      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
       UNIQUE KEY uq_karyawan_kode (idtenant, kodekaryawan)
     ) ENGINE=InnoDB
   `);
 
-  // komponengaji
+  // jenisabsensi
   await connection.query(`
-    CREATE TABLE komponengaji (
-      idkomponengaji  INT AUTO_INCREMENT PRIMARY KEY,
-      idtenant        INT NOT NULL,
-      idkaryawan      INT NOT NULL,
-      namakomponan    VARCHAR(100) NOT NULL,
-      jenis           VARCHAR(20) NOT NULL,
-      amount          DECIMAL(15,2) DEFAULT 0,
-      status          VARCHAR(20) DEFAULT 'AKTIF',
+    CREATE TABLE jenisabsensi (
+      idjenisabsensi INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant       INT NOT NULL,
+      kodejenis      VARCHAR(30) NOT NULL,
+      namajenis      VARCHAR(100) NOT NULL,
+      potonggaji     TINYINT(1) NOT NULL DEFAULT 0,
+      status         VARCHAR(20) DEFAULT 'AKTIF',
+      userentry      INT NOT NULL DEFAULT 0,
+      tglentry       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
-      FOREIGN KEY (idkaryawan) REFERENCES karyawan(idkaryawan) ON DELETE CASCADE
+      UNIQUE KEY uq_jenisabsensi_kode (idtenant, kodejenis)
     ) ENGINE=InnoDB
   `);
 
-  // absensi
+  // absen
   await connection.query(`
-    CREATE TABLE absensi (
-      idabsensi     INT AUTO_INCREMENT PRIMARY KEY,
-      idtenant      INT NOT NULL,
-      idlokasi      INT NOT NULL,
-      idkaryawan    INT NOT NULL,
-      tglabsensi    DATE NOT NULL,
-      jampinmasuk   TIME DEFAULT NULL,
-      jampinkeluar  TIME DEFAULT NULL,
-      jenisabsensi  VARCHAR(30) DEFAULT 'HADIR',
-      keterangan    VARCHAR(255) DEFAULT NULL,
-      userentry     INT NOT NULL DEFAULT 0,
-      tglentry      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CREATE TABLE absen (
+      idabsen    INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant   INT NOT NULL,
+      idlokasi   INT NOT NULL,
+      kodeabsen  VARCHAR(30) NOT NULL,
+      tgltrans   DATE NOT NULL,
+      iduser     INT NOT NULL,
+      catatan    VARCHAR(255) DEFAULT NULL,
+      status     VARCHAR(20) DEFAULT 'DRAFT',
+      userentry  INT NOT NULL DEFAULT 0,
+      tglentry   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
+      UNIQUE KEY uq_absen_kode (idtenant, idlokasi, kodeabsen),
+      INDEX idx_absen_tgl (idtenant, idlokasi, tgltrans),
+      INDEX idx_absen_status (status)
+    ) ENGINE=InnoDB
+  `);
+
+  // absendtl
+  await connection.query(`
+    CREATE TABLE absendtl (
+      idabsendtl INT AUTO_INCREMENT PRIMARY KEY,
+      idabsen    INT NOT NULL,
+      idtenant   INT NOT NULL,
+      idkaryawan INT NOT NULL,
+      jenis      VARCHAR(30) NOT NULL DEFAULT 'HADIR',
+      catatan    VARCHAR(255) DEFAULT NULL,
+      FOREIGN KEY (idabsen) REFERENCES absen(idabsen) ON DELETE CASCADE,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idkaryawan) REFERENCES karyawan(idkaryawan),
-      UNIQUE KEY uq_absensi (idtenant, idkaryawan, tglabsensi)
+      UNIQUE KEY uq_absendtl_karyawan (idabsen, idkaryawan),
+      INDEX idx_absendtl_karyawan (idtenant, idkaryawan)
     ) ENGINE=InnoDB
   `);
 
-  // payroll
+  // gaji
   await connection.query(`
-    CREATE TABLE payroll (
-      idpayroll       INT AUTO_INCREMENT PRIMARY KEY,
-      idtenant        INT NOT NULL,
-      idlokasi        INT NOT NULL,
-      kodepayroll     VARCHAR(30) NOT NULL,
-      periodbulan     VARCHAR(7) NOT NULL,
-      tglawal         DATE NOT NULL,
-      tglakhir        DATE NOT NULL,
-      total_bruto     DECIMAL(15,2) DEFAULT 0,
-      total_potongan  DECIMAL(15,2) DEFAULT 0,
-      total_neto      DECIMAL(15,2) DEFAULT 0,
-      idakun_beban    INT DEFAULT NULL,
-      idakun_hutang   INT DEFAULT NULL,
-      status          VARCHAR(20) DEFAULT 'DRAFT',
-      iduser          INT NOT NULL,
-      userentry       INT NOT NULL DEFAULT 0,
-      tglentry        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CREATE TABLE gaji (
+      idgaji      INT AUTO_INCREMENT PRIMARY KEY,
+      idtenant    INT NOT NULL,
+      idlokasi    INT NOT NULL,
+      kodegaji    VARCHAR(30) NOT NULL,
+      periodbulan VARCHAR(7) NOT NULL,
+      bulan       INT NOT NULL,
+      tahun       INT NOT NULL,
+      tglawal     DATE NOT NULL,
+      tglakhir    DATE NOT NULL,
+      totalgaji   DECIMAL(15,2) DEFAULT 0,
+      totalbonus  DECIMAL(15,2) DEFAULT 0,
+      total       DECIMAL(15,2) DEFAULT 0,
+      totalcash   DECIMAL(15,2) DEFAULT 0,
+      totalbank   DECIMAL(15,2) DEFAULT 0,
+      idakun_beban INT DEFAULT NULL,
+      idakun_kas   INT DEFAULT NULL,
+      idakun_bank  INT DEFAULT NULL,
+      iduser      INT NOT NULL,
+      catatan     VARCHAR(255) DEFAULT NULL,
+      status      VARCHAR(20) DEFAULT 'DRAFT',
+      userentry   INT NOT NULL DEFAULT 0,
+      tglentry    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
       FOREIGN KEY (idlokasi) REFERENCES lokasi(idlokasi),
-      UNIQUE KEY uq_payroll_kode (idtenant, idlokasi, kodepayroll),
-      INDEX idx_payroll_periode (idtenant, idlokasi, periodbulan)
+      UNIQUE KEY uq_gaji_kode (idtenant, idlokasi, kodegaji),
+      INDEX idx_gaji_periode (idtenant, idlokasi, periodbulan),
+      INDEX idx_gaji_status (status)
     ) ENGINE=InnoDB
   `);
 
-  // payrolldtl
+  // gajidtl
   await connection.query(`
-    CREATE TABLE payrolldtl (
-      idpayrolldtl    INT AUTO_INCREMENT PRIMARY KEY,
-      idpayroll       INT NOT NULL,
+    CREATE TABLE gajidtl (
+      idgajidtl       INT AUTO_INCREMENT PRIMARY KEY,
+      idgaji          INT NOT NULL,
       idtenant        INT NOT NULL,
       idkaryawan      INT NOT NULL,
-      gajipoko        DECIMAL(15,2) DEFAULT 0,
-      total_tunjangan DECIMAL(15,2) DEFAULT 0,
-      total_potongan  DECIMAL(15,2) DEFAULT 0,
-      gaji_bersih     DECIMAL(15,2) DEFAULT 0,
-      harikerja       INT DEFAULT 0,
-      hari_hadir      INT DEFAULT 0,
-      FOREIGN KEY (idpayroll) REFERENCES payroll(idpayroll) ON DELETE CASCADE,
+      gajimaster      DECIMAL(15,2) DEFAULT 0,
+      totalabsen      INT DEFAULT 0,
+      totalpotongabsen INT DEFAULT 0,
+      gajiharian      DECIMAL(15,2) DEFAULT 0,
+      potonganabsen   DECIMAL(15,2) DEFAULT 0,
+      gaji            DECIMAL(15,2) DEFAULT 0,
+      bonus           DECIMAL(15,2) DEFAULT 0,
+      total           DECIMAL(15,2) DEFAULT 0,
+      bayarcash       DECIMAL(15,2) DEFAULT 0,
+      bayarbank       DECIMAL(15,2) DEFAULT 0,
+      catatan         VARCHAR(255) DEFAULT NULL,
+      FOREIGN KEY (idgaji) REFERENCES gaji(idgaji) ON DELETE CASCADE,
       FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
-      FOREIGN KEY (idkaryawan) REFERENCES karyawan(idkaryawan)
+      FOREIGN KEY (idkaryawan) REFERENCES karyawan(idkaryawan),
+      UNIQUE KEY uq_gajidtl_karyawan (idgaji, idkaryawan)
+    ) ENGINE=InnoDB
+  `);
+
+  // gajiabsendtl
+  await connection.query(`
+    CREATE TABLE gajiabsendtl (
+      idgajiabsendtl INT AUTO_INCREMENT PRIMARY KEY,
+      idgaji         INT NOT NULL,
+      idgajidtl      INT NOT NULL,
+      idtenant       INT NOT NULL,
+      idabsen        INT NOT NULL,
+      idabsendtl     INT NOT NULL,
+      FOREIGN KEY (idgaji) REFERENCES gaji(idgaji) ON DELETE CASCADE,
+      FOREIGN KEY (idgajidtl) REFERENCES gajidtl(idgajidtl) ON DELETE CASCADE,
+      FOREIGN KEY (idtenant) REFERENCES tenant(idtenant),
+      FOREIGN KEY (idabsen) REFERENCES absen(idabsen),
+      FOREIGN KEY (idabsendtl) REFERENCES absendtl(idabsendtl),
+      UNIQUE KEY uq_gajiabsendtl (idgaji, idabsendtl),
+      INDEX idx_gajiabsen_absen (idtenant, idabsen)
     ) ENGINE=InnoDB
   `);
 
@@ -1959,8 +2006,9 @@ async function migrate() {
     [12, 3, 'master.customer', 'Customer', 3, null, '/master/customer'],
     [11, 3, 'master.supplier', 'Supplier', 4, null, '/master/supplier'],
     [15, 3, 'master.lokasi',   'Lokasi',   5, null, '/master/lokasi'],
-    [13, 3, 'master.akun',     'Akun',     6, null, '/master/akun'],
-    [69, 3, 'master.promo',    'Promo',    7, null, '/master/promo'],
+    [41, 3, 'master.karyawan', 'Karyawan', 6, null, '/master/karyawan'],
+    [13, 3, 'master.akun',     'Akun',     7, null, '/master/akun'],
+    [69, 3, 'master.promo',    'Promo',    8, null, '/master/promo'],
   ];
   for (const m of masterChildren) {
     await connection.query(
@@ -2026,9 +2074,9 @@ async function migrate() {
 
   // Seed menu — children: HR
   const hrChildren = [
-    [41, 40, 'sdm.karyawan', 'Karyawan', 1, null, '/sdm/karyawan'],
-    [42, 40, 'sdm.absensi',  'Absensi',  2, null, '/sdm/absensi'],
-    [43, 40, 'sdm.payroll',  'Gaji',     3, null, '/sdm/payroll'],
+    [42, 40, 'sdm.absensi',        'Absensi',        1, null, '/sdm/absensi'],
+    [43, 40, 'sdm.gaji',           'Gaji',           2, null, '/sdm/gaji'],
+    [70, 40, 'sdm.settingabsensi', 'Setting Absensi',3, null, '/sdm/setting-absensi'],
   ];
   for (const m of hrChildren) {
     await connection.query(
@@ -2042,6 +2090,7 @@ async function migrate() {
     [50, 8, 'laporan.pembelian', 'Pembelian', 1, null, null],
     [51, 8, 'laporan.penjualan', 'Penjualan', 2, null, null],
     [52, 8, 'laporan.stok',      'Stok',      3, null, null],
+    [71, 8, 'laporan.hr',        'HR',        4, null, null],
   ];
   for (const m of laporanGrp) {
     await connection.query(
@@ -2094,12 +2143,24 @@ async function migrate() {
 
   // Seed menu — Laporan Akuntansi: grup + leaves (parent: laporan idmenu=8)
   const laporanAkuntansi = [
-    [65, 8,  'laporan.akuntansi',           'Akuntansi',        4, null, null],
+    [65, 8,  'laporan.akuntansi',           'Akuntansi',        5, null, null],
     [66, 65, 'laporan.akuntansi.jurnal',    'Jurnal Transaksi', 1, null, null],
     [67, 65, 'laporan.akuntansi.bukubesar', 'Buku Besar',       2, null, null],
     [68, 65, 'laporan.akuntansi.neraca',    'Neraca',           3, null, null],
   ];
   for (const m of laporanAkuntansi) {
+    await connection.query(
+      'INSERT INTO menu (idmenu, idparent, kodemenu, namamenu, urutan, icon, path) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      m
+    );
+  }
+
+  // Seed menu - Laporan HR leaves (parent: 71)
+  const laporanHrLeaves = [
+    [72, 71, 'laporan.hr.absen', 'Laporan Absen',      1, null, null],
+    [73, 71, 'laporan.hr.gaji',  'Laporan Penggajian', 2, null, null],
+  ];
+  for (const m of laporanHrLeaves) {
     await connection.query(
       'INSERT INTO menu (idmenu, idparent, kodemenu, namamenu, urutan, icon, path) VALUES (?, ?, ?, ?, ?, ?, ?)',
       m
@@ -2156,6 +2217,24 @@ async function seedDefaultJurnalSettings(conn, idtenant, options = {}) {
   }
 }
 
+async function seedDefaultJenisAbsensi(conn, idtenant, iduser = 0) {
+  const defaults = [
+    ['HADIR', 'HADIR', 0],
+    ['IZIN', 'IZIN', 0],
+    ['SAKIT', 'SAKIT', 0],
+    ['CUTI', 'CUTI', 0],
+    ['ALPHA', 'ALPHA', 1],
+  ];
+  for (const [kodejenis, namajenis, potonggaji] of defaults) {
+    await conn.query(
+      `INSERT IGNORE INTO jenisabsensi
+        (idtenant, kodejenis, namajenis, potonggaji, status, userentry)
+       VALUES (?, ?, ?, ?, 'AKTIF', ?)`,
+      [idtenant, kodejenis, namajenis, potonggaji, iduser || 0]
+    );
+  }
+}
+
 async function seedDefaultCustomer(conn, idtenant, iduser = 0) {
   await conn.query(
     `INSERT IGNORE INTO customer (idtenant, kodecustomer, namacustomer, alamat, hp, status, userentry)
@@ -2169,6 +2248,7 @@ module.exports = {
   DEFAULT_JURNAL_AKUN,
   seedDefaultCOA,
   seedDefaultJurnalSettings,
+  seedDefaultJenisAbsensi,
   seedDefaultCustomer,
 };
 

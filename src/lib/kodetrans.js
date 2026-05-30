@@ -219,25 +219,29 @@ async function generateKodeBPK(conn, idtenant, idlokasi) {
   return generateKode(conn, 'BPK', idtenant, idlokasi, 'bpk', 'kodebpk');
 }
 
-// Generate kode payroll: format PAY.KODELOKASI.YYMM.NNN (monthly)
-async function generateKodePayroll(conn, idtenant, idlokasi) {
-  const now = new Date();
-  const yy = String(now.getFullYear()).slice(-2);
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const dateStr = `${yy}${mm}`;
+// Generate kode absensi: format ABS.KODELOKASI.YYMMDD.NNN
+async function generateKodeAbsen(conn, idtenant, idlokasi) {
+  return generateKode(conn, 'ABS', idtenant, idlokasi, 'absen', 'kodeabsen');
+}
+
+// Generate kode gaji: format GJ.KODELOKASI.YYMM.NNN
+async function generateKodeGaji(conn, idtenant, idlokasi, periodbulan) {
+  const source = periodbulan || new Date().toISOString().slice(0, 7);
+  const [yyyy, mm] = source.split('-');
+  const dateStr = `${String(yyyy).slice(-2)}${mm}`;
 
   const [[lokasi]] = await conn.query('SELECT kodelokasi FROM lokasi WHERE idtenant = ? AND idlokasi = ?', [idtenant, idlokasi]);
   const kdlok = lokasi.kodelokasi;
-  const pattern = `PAY.${kdlok}.${dateStr}.%`;
+  const pattern = `GJ.${kdlok}.${dateStr}.%`;
 
-  return withKodeLock(conn, `kodegen:${idtenant}:payroll`, async () => {
+  return withKodeLock(conn, `kodegen:${idtenant}:gaji`, async () => {
     const [[{ maxKode }]] = await conn.query(
-      `SELECT MAX(kodepayroll) as maxKode FROM payroll WHERE idtenant = ? AND idlokasi = ? AND kodepayroll LIKE ?`,
+      `SELECT MAX(kodegaji) as maxKode FROM gaji WHERE idtenant = ? AND idlokasi = ? AND kodegaji LIKE ?`,
       [idtenant, idlokasi, pattern]
     );
     let num = 1;
     if (maxKode) num = parseInt(maxKode.split('.').pop()) + 1;
-    return `PAY.${kdlok}.${dateStr}.${String(num).padStart(3, '0')}`;
+    return `GJ.${kdlok}.${dateStr}.${String(num).padStart(3, '0')}`;
   });
 }
 
@@ -262,7 +266,8 @@ module.exports = {
   generateKodePO,
   generateKodeBPB,
   generateKodeStockOpname,
-  generateKodePayroll,
   generateKodeSO,
   generateKodeBPK,
+  generateKodeAbsen,
+  generateKodeGaji,
 };

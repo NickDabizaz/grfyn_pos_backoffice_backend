@@ -6,6 +6,7 @@ const { pool, tenantQuery, tenantExecute, getConnection, getTenantContext } = re
 const logger = require('../../lib/logger');
 const { ACCESS_FIELDS, fullAccess, normalizeAccess, hasAnyAccess } = require('../../lib/access');
 const { assertCanHaveActiveUser } = require('../../lib/subscription');
+const { isForeignKeyConstraintError } = require('../../lib/dbErrors');
 
 function normalizeMenuPayload(menu) {
   if (typeof menu === 'number' || typeof menu === 'string') {
@@ -415,16 +416,28 @@ exports.updateTemplate = async (req, res) => {
 
 // DELETE /user/templates/:id — Menghapus template menu
 exports.deleteTemplate = async (req, res) => {
+  const conn = await getConnection();
   try {
     const ctx = getTenantContext();
-    let sqlDelTpl = 'DELETE FROM menutemplate WHERE idmenutemplate = ? AND idtenant = ?';
-    await tenantExecute(
-      sqlDelTpl,
+    await conn.beginTransaction();
+    await conn.query(
+      'DELETE FROM menutemplatedtl WHERE idmenutemplate = ?',
+      [req.params.id]
+    );
+    await conn.query(
+      'DELETE FROM menutemplate WHERE idmenutemplate = ? AND idtenant = ?',
       [req.params.id, ctx.idtenant]
     );
+    await conn.commit();
     res.json({ message: 'Template berhasil dihapus' });
   } catch (err) {
+    await conn.rollback();
+    if (isForeignKeyConstraintError(err)) {
+      return res.status(400).json({ message: 'Template tidak dapat dihapus karena sudah terdapat referensi atas template tersebut.' });
+    }
     logger.error(err, { req });
     res.status(500).json({ message: err.message });
+  } finally {
+    conn.release();
   }
 };

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>Slip Gaji</title>
+  <link rel="stylesheet" href="/reports/laporan_style.css">
+  <style>
+    @media print { .no-print { display: none; } .slip { page-break-after: always; } .slip:last-child { page-break-after: auto; } }
+    .slip { min-height: 96vh; padding: 24px; box-sizing: border-box; page-break-after: always; }
+    .slip:last-child { page-break-after: auto; }
+    .box { border: 1px solid #D7CAC1; border-radius: 8px; padding: 16px; margin-top: 16px; }
+    .row { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; border-bottom: 1px solid #F1E7DD; font-size: 13px; }
+    .row:last-child { border-bottom: 0; }
+    .label { color: #6B5D55; }
+    .value { font-weight: 700; color: #2B211B; text-align: right; }
+    .total { background: #FAEFE5; margin: 12px -16px -16px; padding: 12px 16px; border-radius: 0 0 8px 8px; }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="text-align:right;margin-bottom:10px;">
+    <button onclick="window.print()" style="padding:8px 16px;background:#C4683D;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;">Cetak</button>
+  </div>
+
+  <% slips.forEach(function(slip) { %>
+    <section class="slip">
+      <div class="report-header">
+        <% if (logo) { %><img class="logo" src="<%= logo %>" alt="Logo"><% } %>
+        <h2><%= namatoko %></h2>
+        <p class="subtitle"><%= alamat %> | <%= hp %></p>
+        <h3>SLIP GAJI</h3>
+      </div>
+
+      <div class="box">
+        <div class="row"><span class="label">Kode Gaji</span><span class="value"><%= slip.kodegaji %></span></div>
+        <div class="row"><span class="label">Periode</span><span class="value"><%= slip.periodbulan %></span></div>
+        <div class="row"><span class="label">Lokasi</span><span class="value"><%= slip.namalokasi %></span></div>
+        <div class="row"><span class="label">Karyawan</span><span class="value"><%= slip.kodekaryawan %> - <%= slip.namakaryawan %></span></div>
+        <div class="row"><span class="label">Email / HP</span><span class="value"><%= slip.email || '-' %> / <%= slip.hp || '-' %></span></div>
+      </div>
+
+      <div class="box">
+        <div class="row"><span class="label">Gaji Master</span><span class="value">Rp <%= Number(slip.gajimaster || 0).toLocaleString('id-ID') %></span></div>
+        <div class="row"><span class="label">Total Hari Absen</span><span class="value"><%= slip.totalabsen %> hari</span></div>
+        <div class="row"><span class="label">Hari Potong Gaji</span><span class="value"><%= slip.totalpotongabsen %> hari</span></div>
+        <div class="row"><span class="label">Gaji Harian</span><span class="value">Rp <%= Number(slip.gajiharian || 0).toLocaleString('id-ID') %></span></div>
+        <div class="row"><span class="label">Potongan Absensi</span><span class="value">Rp <%= Number(slip.potonganabsen || 0).toLocaleString('id-ID') %></span></div>
+        <div class="row"><span class="label">Gaji Setelah Potongan</span><span class="value">Rp <%= Number(slip.gaji || 0).toLocaleString('id-ID') %></span></div>
+        <div class="row"><span class="label">Bonus</span><span class="value">Rp <%= Number(slip.bonus || 0).toLocaleString('id-ID') %></span></div>
+        <div class="row"><span class="label">Bayar Cash</span><span class="value">Rp <%= Number(slip.bayarcash || 0).toLocaleString('id-ID') %></span></div>
+        <div class="row"><span class="label">Bayar Bank</span><span class="value">Rp <%= Number(slip.bayarbank || 0).toLocaleString('id-ID') %></span></div>
+        <div class="row total"><span class="label">TOTAL DITERIMA</span><span class="value">Rp <%= Number(slip.total || 0).toLocaleString('id-ID') %></span></div>
+      </div>
+
+      <div class="box">
+        <div class="row"><span class="label">Catatan</span><span class="value"><%= slip.catatan || '-' %></span></div>
+        <div class="row"><span class="label">Tanggal Cetak</span><span class="value"><%= tglcetak %></span></div>
+      </div>
+    </section>
+  <% }); %>
+</body>
+</html>

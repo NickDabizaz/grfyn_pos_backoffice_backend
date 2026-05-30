@@ -1,4 +1,5 @@
 const { tenantQuery, getConnection, getTenantContext } = require('../../config/db');
+const { generateKodeAbsen } = require('../../lib/kodetrans');
 const logger = require('../../lib/logger');
 
 function daysBetween(tglawal, tglakhir) {
@@ -38,7 +39,7 @@ exports.getOne = async (req, res) => {
   try {
     const ctx = getTenantContext();
     const rows = await tenantQuery(
-      `SELECT c.*, k.namakaryawan, k.kodekaryawan, k.jabatan FROM cuti_karyawan c
+      `SELECT c.*, k.namakaryawan, k.kodekaryawan FROM cuti_karyawan c
        LEFT JOIN karyawan k ON c.idkaryawan = k.idkaryawan AND k.idtenant = c.idtenant
        WHERE c.idcuti = ? AND c.idtenant = ?`,
       [req.params.id, ctx.idtenant]
@@ -117,14 +118,28 @@ exports.approve = async (req, res) => {
     for (let i = 0; i < total; i++) {
       const tgl = addDays(tglawal, i);
       const [[existing]] = await conn.query(
-        'SELECT idabsensi FROM absensi WHERE idtenant = ? AND idkaryawan = ? AND tglabsensi = ?',
-        [ctx.idtenant, cuti.idkaryawan, tgl]
+        `SELECT a.idabsen, ad.idabsendtl
+         FROM absen a
+         LEFT JOIN absendtl ad ON ad.idabsen = a.idabsen AND ad.idtenant = a.idtenant AND ad.idkaryawan = ?
+         WHERE a.idtenant = ? AND a.idlokasi = ? AND a.tgltrans = ? AND a.status = 'DRAFT'
+         LIMIT 1`,
+        [cuti.idkaryawan, ctx.idtenant, cuti.idlokasi, tgl]
       );
-      if (!existing) {
+      let idabsen = existing?.idabsen;
+      if (!idabsen) {
+        const kodeabsen = await generateKodeAbsen(conn, ctx.idtenant, cuti.idlokasi);
+        const [header] = await conn.query(
+          `INSERT INTO absen (idtenant, idlokasi, kodeabsen, tgltrans, iduser, status, userentry, tglentry)
+           VALUES (?, ?, ?, ?, ?, 'DRAFT', ?, NOW())`,
+          [ctx.idtenant, cuti.idlokasi, kodeabsen, tgl, ctx.iduser, ctx.iduser]
+        );
+        idabsen = header.insertId;
+      }
+      if (!existing?.idabsendtl) {
         await conn.query(
-          `INSERT INTO absensi (idtenant, idlokasi, idkaryawan, tglabsensi, jenisabsensi, userentry, tglentry)
-           VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-          [ctx.idtenant, cuti.idlokasi, cuti.idkaryawan, tgl, cuti.jeniscuti, ctx.iduser]
+          `INSERT INTO absendtl (idabsen, idtenant, idkaryawan, jenis, catatan)
+           VALUES (?, ?, ?, ?, ?)`,
+          [idabsen, ctx.idtenant, cuti.idkaryawan, 'CUTI', cuti.keterangan || cuti.jeniscuti || null]
         );
       }
     }

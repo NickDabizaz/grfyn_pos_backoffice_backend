@@ -2,16 +2,27 @@ const { tenantQuery, getConnection, getTenantContext } = require('../../config/d
 const { generateKodeMaster } = require('../../lib/kodetrans');
 const logger = require('../../lib/logger');
 
-// GET /karyawan
+function normalizeStatus(status, fallback = 'AKTIF') {
+  const value = String(status || fallback).toUpperCase();
+  return value === 'TIDAK AKTIF' ? 'NONAKTIF' : value;
+}
+
 exports.getAll = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const { status, search } = req.query;
-    let sql = 'SELECT * FROM karyawan WHERE idtenant = ?';
+    const { status, search, idlokasi } = req.query;
+    let sql = `SELECT k.*, l.kodelokasi, l.namalokasi
+      FROM karyawan k
+      LEFT JOIN lokasi l ON l.idlokasi = k.idlokasi AND l.idtenant = k.idtenant
+      WHERE k.idtenant = ?`;
     const params = [ctx.idtenant];
-    if (status) { sql += ' AND status = ?'; params.push(status); }
-    if (search) { sql += ' AND (namakaryawan LIKE ? OR kodekaryawan LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
-    sql += ' ORDER BY namakaryawan';
+    if (status) { sql += ' AND k.status = ?'; params.push(normalizeStatus(status)); }
+    if (idlokasi) { sql += ' AND k.idlokasi = ?'; params.push(idlokasi); }
+    if (search) {
+      sql += ' AND (k.namakaryawan LIKE ? OR k.kodekaryawan LIKE ? OR k.email LIKE ? OR k.hp LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+    }
+    sql += ' ORDER BY k.namakaryawan';
     const rows = await tenantQuery(sql, params);
     res.json(rows);
   } catch (err) {
@@ -20,12 +31,14 @@ exports.getAll = async (req, res) => {
   }
 };
 
-// GET /karyawan/:id
 exports.getOne = async (req, res) => {
   try {
     const ctx = getTenantContext();
     const rows = await tenantQuery(
-      'SELECT * FROM karyawan WHERE idkaryawan = ? AND idtenant = ?',
+      `SELECT k.*, l.kodelokasi, l.namalokasi
+       FROM karyawan k
+       LEFT JOIN lokasi l ON l.idlokasi = k.idlokasi AND l.idtenant = k.idtenant
+       WHERE k.idkaryawan = ? AND k.idtenant = ?`,
       [req.params.id, ctx.idtenant]
     );
     if (!rows.length) return res.status(404).json({ message: 'Karyawan tidak ditemukan' });
@@ -36,26 +49,30 @@ exports.getOne = async (req, res) => {
   }
 };
 
-// POST /karyawan
 exports.create = async (req, res) => {
   const conn = await getConnection();
   try {
     const ctx = getTenantContext();
-    await conn.beginTransaction();
+    const { namakaryawan, email, hp, nohp, gaji, idlokasi } = req.body;
+    if (!namakaryawan) return res.status(400).json({ message: 'Nama karyawan wajib diisi' });
+    if (!idlokasi) return res.status(400).json({ message: 'Lokasi wajib dipilih' });
 
-    const { namakaryawan, jabatan, departemen, tgllahir, tglmasuk, gajipoko, norekening, namabank, hp, email, alamat } = req.body;
-    if (!namakaryawan) return res.status(400).json({ message: 'namakaryawan wajib diisi' });
-
-    const kodekaryawan = await generateKodeMaster(conn, 'KRY', ctx.idtenant, 'karyawan', 'kodekaryawan');
-
-    const [result] = await conn.query(
-      `INSERT INTO karyawan (idtenant, kodekaryawan, namakaryawan, jabatan, departemen, tgllahir, tglmasuk, gajipoko, norekening, namabank, hp, email, alamat, status, userentry, tglentry)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'AKTIF', ?, NOW())`,
-      [ctx.idtenant, kodekaryawan, namakaryawan, jabatan || null, departemen || null, tgllahir || null, tglmasuk || null, gajipoko || 0, norekening || null, namabank || null, hp || null, email || null, alamat || null, ctx.iduser]
+    const [[lokasi]] = await conn.query(
+      "SELECT idlokasi FROM lokasi WHERE idtenant = ? AND idlokasi = ? AND status = 'AKTIF'",
+      [ctx.idtenant, idlokasi]
     );
+    if (!lokasi) return res.status(400).json({ message: 'Lokasi tidak valid atau tidak aktif' });
 
+    await conn.beginTransaction();
+    const kodekaryawan = await generateKodeMaster(conn, 'KRY', ctx.idtenant, 'karyawan', 'kodekaryawan');
+    const [result] = await conn.query(
+      `INSERT INTO karyawan
+        (idtenant, idlokasi, kodekaryawan, namakaryawan, email, hp, gaji, status, userentry, tglentry)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'AKTIF', ?, NOW())`,
+      [ctx.idtenant, idlokasi, kodekaryawan, namakaryawan, email || null, hp || nohp || null, gaji || 0, ctx.iduser]
+    );
     await conn.commit();
-    await logger.history('KARYAWAN_CREATE', { idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser, ref: kodekaryawan, req });
+    await logger.history('KARYAWAN_CREATE', { idtenant: ctx.idtenant, idlokasi, iduser: ctx.iduser, ref: kodekaryawan, req });
     res.status(201).json({ message: 'Karyawan berhasil ditambah', idkaryawan: result.insertId, kodekaryawan });
   } catch (err) {
     await conn.rollback();
@@ -66,32 +83,49 @@ exports.create = async (req, res) => {
   }
 };
 
-// PUT /karyawan/:id
 exports.update = async (req, res) => {
   const conn = await getConnection();
   try {
     const ctx = getTenantContext();
-    await conn.beginTransaction();
+    const { namakaryawan, email, hp, nohp, gaji, idlokasi, status } = req.body;
 
-    const [[karyawan]] = await conn.query(
+    await conn.beginTransaction();
+    const [[row]] = await conn.query(
       'SELECT * FROM karyawan WHERE idkaryawan = ? AND idtenant = ?',
       [req.params.id, ctx.idtenant]
     );
-    if (!karyawan) return res.status(404).json({ message: 'Karyawan tidak ditemukan' });
-
-    const { namakaryawan, jabatan, departemen, tgllahir, tglmasuk, gajipoko, norekening, namabank, hp, email, alamat, status } = req.body;
+    if (!row) {
+      await conn.rollback();
+      return res.status(404).json({ message: 'Karyawan tidak ditemukan' });
+    }
+    const nextLokasi = idlokasi || row.idlokasi;
+    const [[lokasi]] = await conn.query(
+      "SELECT idlokasi FROM lokasi WHERE idtenant = ? AND idlokasi = ? AND status = 'AKTIF'",
+      [ctx.idtenant, nextLokasi]
+    );
+    if (!lokasi) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Lokasi tidak valid atau tidak aktif' });
+    }
 
     await conn.query(
-      `UPDATE karyawan SET namakaryawan = ?, jabatan = ?, departemen = ?, tgllahir = ?, tglmasuk = ?,
-       gajipoko = ?, norekening = ?, namabank = ?, hp = ?, email = ?, alamat = ?, status = ?
+      `UPDATE karyawan
+       SET idlokasi = ?, namakaryawan = ?, email = ?, hp = ?, gaji = ?, status = ?
        WHERE idkaryawan = ? AND idtenant = ?`,
-      [namakaryawan || karyawan.namakaryawan, jabatan || null, departemen || null, tgllahir || null, tglmasuk || null,
-       gajipoko !== undefined ? gajipoko : karyawan.gajipoko, norekening || null, namabank || null, hp || null, email || null, alamat || null,
-       status || karyawan.status, req.params.id, ctx.idtenant]
+      [
+        nextLokasi,
+        namakaryawan || row.namakaryawan,
+        email ?? row.email,
+        hp ?? nohp ?? row.hp,
+        gaji !== undefined ? gaji : row.gaji,
+        normalizeStatus(status, row.status),
+        req.params.id,
+        ctx.idtenant,
+      ]
     );
 
     await conn.commit();
-    await logger.history('KARYAWAN_UPDATE', { idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser, ref: karyawan.kodekaryawan, req });
+    await logger.history('KARYAWAN_UPDATE', { idtenant: ctx.idtenant, idlokasi: nextLokasi, iduser: ctx.iduser, ref: row.kodekaryawan, req });
     res.json({ message: 'Karyawan berhasil diupdate' });
   } catch (err) {
     await conn.rollback();
@@ -102,79 +136,30 @@ exports.update = async (req, res) => {
   }
 };
 
-// DELETE /karyawan/:id (soft delete)
 exports.remove = async (req, res) => {
   const conn = await getConnection();
   try {
     const ctx = getTenantContext();
     await conn.beginTransaction();
 
-    const [[karyawan]] = await conn.query(
+    const [[row]] = await conn.query(
       'SELECT * FROM karyawan WHERE idkaryawan = ? AND idtenant = ?',
       [req.params.id, ctx.idtenant]
     );
-    if (!karyawan) return res.status(404).json({ message: 'Karyawan tidak ditemukan' });
-
-    await conn.query(
-      "UPDATE karyawan SET status = 'NONAKTIF' WHERE idkaryawan = ? AND idtenant = ?",
-      [req.params.id, ctx.idtenant]
-    );
-
-    await conn.commit();
-    await logger.history('KARYAWAN_DELETE', { idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser, ref: karyawan.kodekaryawan, req });
-    res.json({ message: 'Karyawan berhasil dinonaktifkan' });
-  } catch (err) {
-    await conn.rollback();
-    logger.error(err, { req });
-    res.status(500).json({ message: err.message });
-  } finally {
-    conn.release();
-  }
-};
-
-// GET /karyawan/:id/komponen — List komponen gaji karyawan
-exports.getKomponenGaji = async (req, res) => {
-  try {
-    const ctx = getTenantContext();
-    const rows = await tenantQuery(
-      "SELECT * FROM komponengaji WHERE idkaryawan = ? AND idtenant = ? AND status = 'AKTIF' ORDER BY jenis, namakomponan",
-      [req.params.id, ctx.idtenant]
-    );
-    res.json(rows);
-  } catch (err) {
-    logger.error(err, { req });
-    res.status(500).json({ message: err.message });
-  }
-};
-
-// POST /karyawan/:id/komponen — Set/replace komponen gaji
-exports.setKomponenGaji = async (req, res) => {
-  const conn = await getConnection();
-  try {
-    const ctx = getTenantContext();
-    const { items } = req.body;
-    if (!items) return res.status(400).json({ message: 'items wajib diisi' });
-
-    await conn.beginTransaction();
-
-    // Hapus semua komponen lama lalu insert baru
-    await conn.query(
-      'DELETE FROM komponengaji WHERE idkaryawan = ? AND idtenant = ?',
-      [req.params.id, ctx.idtenant]
-    );
-
-    for (const item of items) {
-      await conn.query(
-        `INSERT INTO komponengaji (idtenant, idkaryawan, namakomponan, jenis, amount, status)
-         VALUES (?, ?, ?, ?, ?, 'AKTIF')`,
-        [ctx.idtenant, req.params.id, item.namakomponan, item.jenis, item.amount || 0]
-      );
+    if (!row) {
+      await conn.rollback();
+      return res.status(404).json({ message: 'Karyawan tidak ditemukan' });
     }
 
+    await conn.query('DELETE FROM karyawan WHERE idkaryawan = ? AND idtenant = ?', [req.params.id, ctx.idtenant]);
     await conn.commit();
-    res.json({ message: 'Komponen gaji berhasil disimpan' });
+    await logger.history('KARYAWAN_DELETE', { idtenant: ctx.idtenant, idlokasi: row.idlokasi, iduser: ctx.iduser, ref: row.kodekaryawan, req });
+    res.json({ message: 'Karyawan berhasil dihapus' });
   } catch (err) {
     await conn.rollback();
+    if (err.code === 'ER_ROW_IS_REFERENCED' || err.code === 'ER_ROW_IS_REFERENCED_2' || err.errno === 1451) {
+      return res.status(400).json({ message: 'Karyawan sudah dipakai transaksi, tidak bisa dihapus' });
+    }
     logger.error(err, { req });
     res.status(500).json({ message: err.message });
   } finally {

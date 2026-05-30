@@ -1,29 +1,90 @@
 const { tenantQuery, getConnection, getTenantContext } = require('../../config/db');
-const { generateKodePayroll } = require('../../lib/kodetrans');
+const { generateKodeGaji } = require('../../lib/kodetrans');
+const { getDefaultAkunJurnal, postJurnal, hapusJurnal, round2 } = require('../../lib/jurnalhelper');
 const logger = require('../../lib/logger');
 
-// Tambah kolom baru jika belum ada (one-time migration)
-async function ensurePayrollSchema(conn) {
-  const adds = [
-    "ALTER TABLE payrolldtl ADD COLUMN IF NOT EXISTS hari_dibayar INT NOT NULL DEFAULT 0",
-    "ALTER TABLE payrolldtl ADD COLUMN IF NOT EXISTS gajipoko_efektif DECIMAL(15,2) NOT NULL DEFAULT 0",
-    "ALTER TABLE payroll ADD COLUMN IF NOT EXISTS idakun_potongan INT NULL",
-  ];
-  for (const sql of adds) {
-    await conn.query(sql).catch(() => {});
+function getPeriod(input, tahunInput) {
+  let periodbulan = input;
+  if (tahunInput && input) {
+    periodbulan = `${tahunInput}-${String(input).padStart(2, '0')}`;
   }
+  if (!periodbulan) periodbulan = new Date().toISOString().slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(periodbulan)) {
+    const err = new Error('Format periode harus YYYY-MM');
+    err.statusCode = 400;
+    throw err;
+  }
+  const [tahun, bulan] = periodbulan.split('-').map(Number);
+  const tglawal = `${tahun}-${String(bulan).padStart(2, '0')}-01`;
+  const lastDay = new Date(tahun, bulan, 0).getDate();
+  const tglakhir = `${tahun}-${String(bulan).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  return { periodbulan, tahun, bulan, tglawal, tglakhir };
 }
 
-// GET /payroll
+async function findPayrollAccounts(conn, idtenant) {
+  const akun = await getDefaultAkunJurnal(conn, idtenant);
+  const [[beban]] = await conn.query(
+    "SELECT idakun FROM akun WHERE idtenant = ? AND status = 'AKTIF' AND (kodeakun = '5-1003' OR namaakun LIKE '%Beban Gaji%') LIMIT 1",
+    [idtenant]
+  );
+  if (!beban?.idakun) {
+    const err = new Error('Akun Beban Gaji belum tersedia');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!akun.akunKas || !akun.akunBank) {
+    const err = new Error('Harap Setting Akun Default Kas dan Bank di Master Akun');
+    err.statusCode = 400;
+    throw err;
+  }
+  return { beban: beban.idakun, kas: akun.akunKas, bank: akun.akunBank };
+}
+
+async function recalcTotals(conn, ctx, idgaji) {
+  const [[tot]] = await conn.query(
+    `SELECT
+       COALESCE(SUM(gaji), 0) AS totalgaji,
+       COALESCE(SUM(bonus), 0) AS totalbonus,
+       COALESCE(SUM(total), 0) AS total,
+       COALESCE(SUM(bayarcash), 0) AS totalcash,
+       COALESCE(SUM(bayarbank), 0) AS totalbank
+     FROM gajidtl WHERE idgaji = ? AND idtenant = ?`,
+    [idgaji, ctx.idtenant]
+  );
+  await conn.query(
+    `UPDATE gaji SET totalgaji = ?, totalbonus = ?, total = ?, totalcash = ?, totalbank = ?
+     WHERE idgaji = ? AND idtenant = ?`,
+    [tot.totalgaji, tot.totalbonus, tot.total, tot.totalcash, tot.totalbank, idgaji, ctx.idtenant]
+  );
+  return tot;
+}
+
+async function getAbsenIdsForGaji(conn, ctx, idgaji) {
+  const [rows] = await conn.query(
+    'SELECT DISTINCT idabsen FROM gajiabsendtl WHERE idgaji = ? AND idtenant = ?',
+    [idgaji, ctx.idtenant]
+  );
+  return rows.map((r) => r.idabsen);
+}
+
 exports.getAll = async (req, res) => {
   try {
     const ctx = getTenantContext();
-    const { status, periodbulan } = req.query;
-    let sql = 'SELECT * FROM payroll WHERE idlokasi = ?';
-    const params = [ctx.idlokasi];
-    if (status) { sql += ' AND status = ?'; params.push(status); }
-    if (periodbulan) { sql += ' AND periodbulan = ?'; params.push(periodbulan); }
-    sql += ' ORDER BY periodbulan DESC, idpayroll DESC LIMIT 100';
+    const { status, periodbulan, bulan, idlokasi } = req.query;
+    let sql = `SELECT g.*, DATE_FORMAT(g.tglawal, '%Y-%m-%d') AS tglawal,
+        DATE_FORMAT(g.tglakhir, '%Y-%m-%d') AS tglakhir,
+        l.kodelokasi, l.namalokasi, u.namauser,
+        COUNT(gd.idgajidtl) AS total_karyawan
+      FROM gaji g
+      LEFT JOIN gajidtl gd ON gd.idgaji = g.idgaji AND gd.idtenant = g.idtenant
+      LEFT JOIN lokasi l ON l.idlokasi = g.idlokasi AND l.idtenant = g.idtenant
+      LEFT JOIN user u ON u.iduser = g.iduser AND u.idtenant = g.idtenant
+      WHERE g.idtenant = ?`;
+    const params = [ctx.idtenant];
+    if (idlokasi) { sql += ' AND g.idlokasi = ?'; params.push(idlokasi); }
+    if (status) { sql += ' AND g.status = ?'; params.push(status); }
+    if (periodbulan || bulan) { sql += ' AND g.periodbulan = ?'; params.push(periodbulan || bulan); }
+    sql += ' GROUP BY g.idgaji ORDER BY g.periodbulan DESC, g.idgaji DESC LIMIT 200';
     const rows = await tenantQuery(sql, params);
     res.json(rows);
   } catch (err) {
@@ -32,21 +93,27 @@ exports.getAll = async (req, res) => {
   }
 };
 
-// GET /payroll/:id — Detail payroll + per-karyawan breakdown
 exports.getOne = async (req, res) => {
   try {
     const ctx = getTenantContext();
     const rows = await tenantQuery(
-      'SELECT * FROM payroll WHERE idpayroll = ? AND idlokasi = ?',
-      [req.params.id, ctx.idlokasi]
+      `SELECT g.*, DATE_FORMAT(g.tglawal, '%Y-%m-%d') AS tglawal,
+        DATE_FORMAT(g.tglakhir, '%Y-%m-%d') AS tglakhir,
+        l.kodelokasi, l.namalokasi
+       FROM gaji g
+       LEFT JOIN lokasi l ON l.idlokasi = g.idlokasi AND l.idtenant = g.idtenant
+       WHERE g.idgaji = ? AND g.idtenant = ?`,
+      [req.params.id, ctx.idtenant]
     );
-    if (!rows.length) return res.status(404).json({ message: 'Payroll tidak ditemukan' });
+    if (!rows.length) return res.status(404).json({ message: 'Gaji tidak ditemukan' });
 
     const details = await tenantQuery(
-      `SELECT pd.*, k.namakaryawan, k.kodekaryawan FROM payrolldtl pd
-       LEFT JOIN karyawan k ON pd.idkaryawan = k.idkaryawan AND k.idtenant = pd.idtenant
-       WHERE pd.idpayroll = ?`,
-      [req.params.id]
+      `SELECT gd.*, k.kodekaryawan, k.namakaryawan
+       FROM gajidtl gd
+       LEFT JOIN karyawan k ON k.idkaryawan = gd.idkaryawan AND k.idtenant = gd.idtenant
+       WHERE gd.idgaji = ? AND gd.idtenant = ?
+       ORDER BY k.namakaryawan`,
+      [req.params.id, ctx.idtenant]
     );
     res.json({ ...rows[0], details });
   } catch (err) {
@@ -55,302 +122,292 @@ exports.getOne = async (req, res) => {
   }
 };
 
-// POST /payroll/generate — Hitung payroll untuk periode
 exports.generate = async (req, res) => {
   const conn = await getConnection();
   try {
     const ctx = getTenantContext();
-    const { periodbulan, tglawal, tglakhir } = req.body;
-    if (!periodbulan) return res.status(400).json({ message: 'periodbulan wajib diisi' });
-
-    const tglAwal = tglawal || `${periodbulan}-01`;
-    const tglAkhir = tglakhir || `${periodbulan}-31`;
-
-    const [[existing]] = await conn.query(
-      'SELECT idpayroll FROM payroll WHERE idtenant = ? AND idlokasi = ? AND periodbulan = ?',
-      [ctx.idtenant, ctx.idlokasi, periodbulan]
-    );
-    if (existing) return res.status(400).json({ message: 'Payroll untuk periode ini sudah ada' });
-
-    await ensurePayrollSchema(conn);
-    const kodepayroll = await generateKodePayroll(conn, ctx.idtenant, ctx.idlokasi);
+    const idlokasi = Number(req.body.idlokasi || ctx.idlokasi);
+    const { periodbulan, tahun, bulan, tglawal, tglakhir } = getPeriod(req.body.periodbulan || req.body.bulanpayroll || req.body.bulan, req.body.tahun);
+    if (!idlokasi) return res.status(400).json({ message: 'Lokasi wajib dipilih' });
 
     await conn.beginTransaction();
-
-    const [karyawanList] = await conn.query(
-      "SELECT * FROM karyawan WHERE idtenant = ? AND status = 'AKTIF'",
-      [ctx.idtenant]
+    const [[existing]] = await conn.query(
+      "SELECT kodegaji FROM gaji WHERE idtenant = ? AND idlokasi = ? AND periodbulan = ? AND status IN ('DRAFT','APPROVED','CONFIRMED') FOR UPDATE",
+      [ctx.idtenant, idlokasi, periodbulan]
     );
-
-    let totalBruto = 0, totalPotongan = 0, totalNeto = 0;
-
-    const [payrollResult] = await conn.query(
-      `INSERT INTO payroll (idtenant, idlokasi, kodepayroll, periodbulan, tglawal, tglakhir, total_bruto, total_potongan, total_neto, status, iduser, userentry, tglentry)
-       VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 'DRAFT', ?, ?, NOW())`,
-      [ctx.idtenant, ctx.idlokasi, kodepayroll, periodbulan, tglAwal, tglAkhir, ctx.iduser, ctx.iduser]
-    );
-    const idpayroll = payrollResult.insertId;
-
-    for (const kar of karyawanList) {
-      const [komponen] = await conn.query(
-        "SELECT * FROM komponengaji WHERE idkaryawan = ? AND idtenant = ? AND status = 'AKTIF'",
-        [kar.idkaryawan, ctx.idtenant]
-      );
-      let totalTunjangan = 0, totalPotonganKar = 0;
-      for (const k of komponen) {
-        if (k.jenis === 'TUNJANGAN') totalTunjangan += parseFloat(k.amount);
-        else totalPotonganKar += parseFloat(k.amount);
-      }
-
-      // Query absensi: hitung harikerja, hari_hadir, dan hari_dibayar (HADIR+IZIN+SAKIT+CUTI)
-      const [[absensiRow]] = await conn.query(
-        `SELECT
-           COUNT(*) AS harikerja,
-           SUM(CASE WHEN jenisabsensi = 'HADIR' THEN 1 ELSE 0 END) AS hari_hadir,
-           SUM(CASE WHEN jenisabsensi IN ('HADIR','IZIN','SAKIT','CUTI') THEN 1 ELSE 0 END) AS hari_dibayar
-         FROM absensi
-         WHERE idkaryawan = ? AND idtenant = ? AND tglabsensi >= ? AND tglabsensi <= ?`,
-        [kar.idkaryawan, ctx.idtenant, tglAwal, tglAkhir]
-      );
-
-      const hariKerja = Number(absensiRow.harikerja || 0);
-      const hariHadir = Number(absensiRow.hari_hadir || 0);
-      const hariDibayar = Number(absensiRow.hari_dibayar || 0);
-
-      // Prorate gajipoko: potong hanya hari ALPHA (tidak hadir tanpa keterangan)
-      // Jika tidak ada absensi sama sekali, bayar penuh (karyawan baru / absensi belum diinput)
-      const prorationRatio = hariKerja > 0 ? hariDibayar / hariKerja : 1;
-      const gajiPokoEfektif = Math.round(parseFloat(kar.gajipoko) * prorationRatio);
-
-      const gajiBrutoKar = gajiPokoEfektif + totalTunjangan;
-      const gajiBersih = gajiPokoEfektif + totalTunjangan - totalPotonganKar;
-
-      totalBruto += gajiBrutoKar;
-      totalPotongan += totalPotonganKar;
-      totalNeto += gajiBersih;
-
-      await conn.query(
-        `INSERT INTO payrolldtl
-           (idpayroll, idtenant, idkaryawan, gajipoko, total_tunjangan, total_potongan, gaji_bersih,
-            harikerja, hari_hadir, hari_dibayar, gajipoko_efektif)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [idpayroll, ctx.idtenant, kar.idkaryawan, kar.gajipoko, totalTunjangan, totalPotonganKar, gajiBersih,
-         hariKerja, hariHadir, hariDibayar, gajiPokoEfektif]
-      );
+    if (existing) {
+      await conn.rollback();
+      return res.status(409).json({ message: `Gaji periode ini sudah ada (${existing.kodegaji}). Batalkan dulu jika ingin hitung ulang.` });
     }
 
-    await conn.query(
-      'UPDATE payroll SET total_bruto = ?, total_potongan = ?, total_neto = ? WHERE idpayroll = ?',
-      [totalBruto, totalPotongan, totalNeto, idpayroll]
+    const kodegaji = await generateKodeGaji(conn, ctx.idtenant, idlokasi, periodbulan);
+    const [header] = await conn.query(
+      `INSERT INTO gaji
+        (idtenant, idlokasi, kodegaji, periodbulan, bulan, tahun, tglawal, tglakhir, iduser, catatan, status, userentry, tglentry)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, NOW())`,
+      [ctx.idtenant, idlokasi, kodegaji, periodbulan, bulan, tahun, tglawal, tglakhir, ctx.iduser, req.body.catatan || null, ctx.iduser]
     );
+    const idgaji = header.insertId;
 
+    const [karyawan] = await conn.query(
+      "SELECT * FROM karyawan WHERE idtenant = ? AND idlokasi = ? AND status = 'AKTIF' ORDER BY namakaryawan",
+      [ctx.idtenant, idlokasi]
+    );
+    let inserted = 0;
+
+    for (const kar of karyawan) {
+      const [absensi] = await conn.query(
+        `SELECT ad.idabsendtl, ad.idabsen, ad.jenis, COALESCE(ja.potonggaji, 0) AS potonggaji
+         FROM absendtl ad
+         JOIN absen a ON a.idabsen = ad.idabsen AND a.idtenant = ad.idtenant
+         LEFT JOIN jenisabsensi ja ON ja.idtenant = ad.idtenant AND ja.kodejenis = ad.jenis
+         WHERE ad.idtenant = ? AND ad.idkaryawan = ? AND a.idlokasi = ?
+           AND a.tgltrans BETWEEN ? AND ? AND a.status = 'APPROVED'
+         ORDER BY a.tgltrans, ad.idabsendtl`,
+        [ctx.idtenant, kar.idkaryawan, idlokasi, tglawal, tglakhir]
+      );
+      const totalabsen = absensi.length;
+      if (!totalabsen) continue;
+
+      const totalpotongabsen = absensi.filter((a) => Number(a.potonggaji) === 1).length;
+      const gajimaster = round2(kar.gaji);
+      const gajiharian = round2(gajimaster / totalabsen);
+      const potonganabsen = round2(gajiharian * totalpotongabsen);
+      const nilaiGaji = Math.max(round2(gajimaster - potonganabsen), 0);
+
+      const [detail] = await conn.query(
+        `INSERT INTO gajidtl
+          (idgaji, idtenant, idkaryawan, gajimaster, totalabsen, totalpotongabsen,
+           gajiharian, potonganabsen, gaji, bonus, total, bayarcash, bayarbank, catatan)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, NULL)`,
+        [idgaji, ctx.idtenant, kar.idkaryawan, gajimaster, totalabsen, totalpotongabsen, gajiharian, potonganabsen, nilaiGaji, nilaiGaji, nilaiGaji]
+      );
+
+      for (const ab of absensi) {
+        await conn.query(
+          `INSERT INTO gajiabsendtl (idgaji, idgajidtl, idtenant, idabsen, idabsendtl)
+           VALUES (?, ?, ?, ?, ?)`,
+          [idgaji, detail.insertId, ctx.idtenant, ab.idabsen, ab.idabsendtl]
+        );
+      }
+      inserted++;
+    }
+
+    if (!inserted) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Tidak ada absensi APPROVED untuk periode dan lokasi ini' });
+    }
+
+    const totals = await recalcTotals(conn, ctx, idgaji);
     await conn.commit();
-    await logger.history('PAYROLL_GENERATE', {
-      idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser,
-      ref: kodepayroll, detail: { periodbulan, total_neto: totalNeto }, req
-    });
-    res.status(201).json({
-      message: 'Payroll berhasil digenerate',
-      kodepayroll, idpayroll,
-      total_bruto: totalBruto, total_potongan: totalPotongan, total_neto: totalNeto,
-    });
+    await logger.history('GAJI_GENERATE', { idtenant: ctx.idtenant, idlokasi, iduser: ctx.iduser, ref: kodegaji, req });
+    res.status(201).json({ message: 'Gaji berhasil digenerate', idgaji, kodegaji, ...totals });
   } catch (err) {
     await conn.rollback();
     logger.error(err, { req });
-    res.status(500).json({ message: err.message });
+    res.status(err.statusCode || 500).json({ message: err.message });
   } finally {
     conn.release();
   }
 };
 
-// PUT /payroll/:id/posting — Posting jurnal beban gaji (jurnal balanced)
-exports.posting = async (req, res) => {
+exports.update = async (req, res) => {
   const conn = await getConnection();
   try {
     const ctx = getTenantContext();
     await conn.beginTransaction();
-
-    const [[payroll]] = await conn.query(
-      'SELECT * FROM payroll WHERE idpayroll = ? AND idtenant = ? AND idlokasi = ?',
-      [req.params.id, ctx.idtenant, ctx.idlokasi]
+    const [[gaji]] = await conn.query(
+      'SELECT * FROM gaji WHERE idgaji = ? AND idtenant = ? FOR UPDATE',
+      [req.params.id, ctx.idtenant]
     );
-    if (!payroll) return res.status(404).json({ message: 'Payroll tidak ditemukan' });
-    if (payroll.status !== 'DRAFT') return res.status(400).json({ message: 'Hanya DRAFT yang bisa diposting' });
-
-    const { idakun_beban, idakun_hutang, idakun_potongan } = req.body;
-
-    // Cari akun beban gaji (COA 5-1003)
-    let akunBeban = null;
-    if (idakun_beban) {
-      const [[a]] = await conn.query('SELECT idakun FROM akun WHERE idakun = ? AND idtenant = ?', [idakun_beban, ctx.idtenant]);
-      akunBeban = a;
+    if (!gaji) {
+      await conn.rollback();
+      return res.status(404).json({ message: 'Gaji tidak ditemukan' });
     }
-    if (!akunBeban) {
-      const [[a]] = await conn.query("SELECT idakun FROM akun WHERE idtenant = ? AND kodeakun = '5-1003' LIMIT 1", [ctx.idtenant]);
-      akunBeban = a;
+    if (gaji.status !== 'DRAFT') {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Hanya gaji DRAFT yang bisa diedit' });
     }
 
-    // Cari akun hutang gaji (COA 2-1002)
-    let akunHutang = null;
-    if (idakun_hutang) {
-      const [[a]] = await conn.query('SELECT idakun FROM akun WHERE idakun = ? AND idtenant = ?', [idakun_hutang, ctx.idtenant]);
-      akunHutang = a;
-    }
-    if (!akunHutang) {
-      const [[a]] = await conn.query("SELECT idakun FROM akun WHERE idtenant = ? AND kodeakun = '2-1002' LIMIT 1", [ctx.idtenant]);
-      akunHutang = a;
-    }
-
-    // Cari akun hutang potongan (COA 2-1003) — opsional untuk pisahkan potongan
-    let akunPotongan = null;
-    if (idakun_potongan) {
-      const [[a]] = await conn.query('SELECT idakun FROM akun WHERE idakun = ? AND idtenant = ?', [idakun_potongan, ctx.idtenant]);
-      akunPotongan = a;
-    }
-    if (!akunPotongan && Number(payroll.total_potongan) > 0) {
-      // Coba temukan akun khusus potongan
-      const [[a]] = await conn.query(
-        "SELECT idakun FROM akun WHERE idtenant = ? AND (kodeakun = '2-1003' OR namaakun LIKE '%Potongan Gaji%') LIMIT 1",
-        [ctx.idtenant]
+    const details = Array.isArray(req.body.details) ? req.body.details : [];
+    for (const item of details) {
+      const [[row]] = await conn.query(
+        'SELECT * FROM gajidtl WHERE idgajidtl = ? AND idgaji = ? AND idtenant = ?',
+        [item.idgajidtl, req.params.id, ctx.idtenant]
       );
-      akunPotongan = a || null;
-    }
-
-    const [yyyy, mm] = payroll.periodbulan.split('-');
-    const lastDay = new Date(parseInt(yyyy), parseInt(mm), 0).toISOString().slice(0, 10);
-
-    const totalBruto = Number(payroll.total_bruto);
-    const totalNeto  = Number(payroll.total_neto);
-    const totalPotongan = Number(payroll.total_potongan);
-
-    // DEBET: Beban Gaji = total_bruto
-    if (akunBeban) {
-      await conn.query(
-        `INSERT INTO jurnal (idtenant, idlokasi, idtrans, kodetrans, jenis, tgltrans, idakun, posisi, amount, status)
-         VALUES (?, ?, ?, ?, 'payroll', ?, ?, 'DEBET', ?, 'AKTIF')`,
-        [ctx.idtenant, ctx.idlokasi, payroll.idpayroll, payroll.kodepayroll, lastDay, akunBeban.idakun, totalBruto]
-      );
-    }
-
-    if (akunHutang) {
-      if (akunPotongan && totalPotongan > 0) {
-        // Journal balanced dengan 3 entri:
-        // KREDIT Hutang Gaji = total_neto (yang diterima karyawan)
-        await conn.query(
-          `INSERT INTO jurnal (idtenant, idlokasi, idtrans, kodetrans, jenis, tgltrans, idakun, posisi, amount, status)
-           VALUES (?, ?, ?, ?, 'payroll', ?, ?, 'KREDIT', ?, 'AKTIF')`,
-          [ctx.idtenant, ctx.idlokasi, payroll.idpayroll, payroll.kodepayroll, lastDay, akunHutang.idakun, totalNeto]
-        );
-        // KREDIT Hutang Potongan = total_potongan (BPJS, pajak, dll)
-        await conn.query(
-          `INSERT INTO jurnal (idtenant, idlokasi, idtrans, kodetrans, jenis, tgltrans, idakun, posisi, amount, status)
-           VALUES (?, ?, ?, ?, 'payroll', ?, ?, 'KREDIT', ?, 'AKTIF')`,
-          [ctx.idtenant, ctx.idlokasi, payroll.idpayroll, payroll.kodepayroll, lastDay, akunPotongan.idakun, totalPotongan]
-        );
-      } else {
-        // Tidak ada akun potongan terpisah: kredit penuh ke hutang gaji agar balanced
-        await conn.query(
-          `INSERT INTO jurnal (idtenant, idlokasi, idtrans, kodetrans, jenis, tgltrans, idakun, posisi, amount, status)
-           VALUES (?, ?, ?, ?, 'payroll', ?, ?, 'KREDIT', ?, 'AKTIF')`,
-          [ctx.idtenant, ctx.idlokasi, payroll.idpayroll, payroll.kodepayroll, lastDay, akunHutang.idakun, totalBruto]
-        );
+      if (!row) continue;
+      const bonus = round2(item.bonus ?? row.bonus);
+      const total = round2(Number(row.gaji) + bonus);
+      const bayarcash = round2(item.bayarcash ?? total);
+      const bayarbank = round2(item.bayarbank ?? 0);
+      if (Math.abs(round2(bayarcash + bayarbank) - total) > 0.01) {
+        await conn.rollback();
+        return res.status(400).json({ message: `Split pembayaran ${row.idgajidtl} tidak sama dengan total gaji` });
       }
+      await conn.query(
+        `UPDATE gajidtl
+         SET bonus = ?, total = ?, bayarcash = ?, bayarbank = ?, catatan = ?
+         WHERE idgajidtl = ? AND idtenant = ?`,
+        [bonus, total, bayarcash, bayarbank, item.catatan ?? row.catatan, item.idgajidtl, ctx.idtenant]
+      );
     }
 
-    await conn.query(
-      "UPDATE payroll SET status = 'POSTED', idakun_beban = ?, idakun_hutang = ?, idakun_potongan = ? WHERE idpayroll = ? AND idtenant = ?",
-      [idakun_beban || (akunBeban?.idakun ?? null),
-       idakun_hutang || (akunHutang?.idakun ?? null),
-       akunPotongan?.idakun ?? null,
-       req.params.id, ctx.idtenant]
-    );
-
+    const totals = await recalcTotals(conn, ctx, req.params.id);
+    await conn.query('UPDATE gaji SET catatan = ? WHERE idgaji = ? AND idtenant = ?', [req.body.catatan ?? gaji.catatan, req.params.id, ctx.idtenant]);
     await conn.commit();
-    await logger.history('PAYROLL_POSTING', {
-      idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser,
-      ref: payroll.kodepayroll, req
-    });
-    res.json({ message: 'Payroll berhasil diposting' });
+    res.json({ message: 'Gaji berhasil diupdate', ...totals });
   } catch (err) {
     await conn.rollback();
     logger.error(err, { req });
-    res.status(500).json({ message: err.message });
+    res.status(err.statusCode || 500).json({ message: err.message });
   } finally {
     conn.release();
   }
 };
 
-// DELETE /payroll/:id — Cancel payroll DRAFT
+exports.approve = async (req, res) => {
+  const conn = await getConnection();
+  try {
+    const ctx = getTenantContext();
+    await conn.beginTransaction();
+    const [[gaji]] = await conn.query(
+      'SELECT * FROM gaji WHERE idgaji = ? AND idtenant = ? FOR UPDATE',
+      [req.params.id, ctx.idtenant]
+    );
+    if (!gaji) {
+      await conn.rollback();
+      return res.status(404).json({ message: 'Gaji tidak ditemukan' });
+    }
+    if (gaji.status !== 'DRAFT') {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Hanya gaji DRAFT yang bisa diapprove' });
+    }
+
+    const totals = await recalcTotals(conn, ctx, req.params.id);
+    const total = round2(totals.total);
+    const cash = round2(totals.totalcash);
+    const bank = round2(totals.totalbank);
+    if (Math.abs(round2(cash + bank) - total) > 0.01) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Total cash + bank tidak sama dengan total gaji' });
+    }
+
+    const akun = await findPayrollAccounts(conn, ctx.idtenant);
+    await postJurnal(conn, {
+      idtenant: ctx.idtenant,
+      idlokasi: gaji.idlokasi,
+      idtrans: gaji.idgaji,
+      kodetrans: gaji.kodegaji,
+      jenis: 'gaji',
+      tgltrans: gaji.tglakhir,
+      lines: [
+        { idakun: akun.beban, posisi: 'DEBET', amount: total },
+        { idakun: akun.kas, posisi: 'KREDIT', amount: cash },
+        { idakun: akun.bank, posisi: 'KREDIT', amount: bank },
+      ],
+    });
+
+    const absenIds = await getAbsenIdsForGaji(conn, ctx, req.params.id);
+    if (absenIds.length) {
+      await conn.query(
+        "UPDATE absen SET status = 'CONFIRMED' WHERE idtenant = ? AND idabsen IN (?) AND status = 'APPROVED'",
+        [ctx.idtenant, absenIds]
+      );
+    }
+    await conn.query(
+      "UPDATE gaji SET status = 'APPROVED', idakun_beban = ?, idakun_kas = ?, idakun_bank = ? WHERE idgaji = ? AND idtenant = ?",
+      [akun.beban, akun.kas, akun.bank, req.params.id, ctx.idtenant]
+    );
+
+    await conn.commit();
+    await logger.history('GAJI_APPROVE', { idtenant: ctx.idtenant, idlokasi: gaji.idlokasi, iduser: ctx.iduser, ref: gaji.kodegaji, req });
+    res.json({ message: 'Gaji berhasil diapprove' });
+  } catch (err) {
+    await conn.rollback();
+    logger.error(err, { req });
+    res.status(err.statusCode || 500).json({ message: err.message });
+  } finally {
+    conn.release();
+  }
+};
+
+exports.unapprove = async (req, res) => {
+  const conn = await getConnection();
+  try {
+    const ctx = getTenantContext();
+    await conn.beginTransaction();
+    const [[gaji]] = await conn.query(
+      'SELECT * FROM gaji WHERE idgaji = ? AND idtenant = ? FOR UPDATE',
+      [req.params.id, ctx.idtenant]
+    );
+    if (!gaji) {
+      await conn.rollback();
+      return res.status(404).json({ message: 'Gaji tidak ditemukan' });
+    }
+    if (gaji.status !== 'APPROVED') {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Hanya gaji APPROVED yang bisa batal approve' });
+    }
+
+    await hapusJurnal(conn, ctx.idtenant, gaji.kodegaji);
+    const absenIds = await getAbsenIdsForGaji(conn, ctx, req.params.id);
+    if (absenIds.length) {
+      await conn.query(
+        "UPDATE absen SET status = 'APPROVED' WHERE idtenant = ? AND idabsen IN (?) AND status = 'CONFIRMED'",
+        [ctx.idtenant, absenIds]
+      );
+    }
+    await conn.query(
+      "UPDATE gaji SET status = 'DRAFT', idakun_beban = NULL, idakun_kas = NULL, idakun_bank = NULL WHERE idgaji = ? AND idtenant = ?",
+      [req.params.id, ctx.idtenant]
+    );
+    await conn.commit();
+    await logger.history('GAJI_UNAPPROVE', { idtenant: ctx.idtenant, idlokasi: gaji.idlokasi, iduser: ctx.iduser, ref: gaji.kodegaji, req });
+    res.json({ message: 'Approve gaji berhasil dibatalkan' });
+  } catch (err) {
+    await conn.rollback();
+    logger.error(err, { req });
+    res.status(err.statusCode || 500).json({ message: err.message });
+  } finally {
+    conn.release();
+  }
+};
+
 exports.cancel = async (req, res) => {
   const conn = await getConnection();
   try {
     const ctx = getTenantContext();
     await conn.beginTransaction();
-
-    const [[payroll]] = await conn.query(
-      'SELECT * FROM payroll WHERE idpayroll = ? AND idtenant = ? AND idlokasi = ?',
-      [req.params.id, ctx.idtenant, ctx.idlokasi]
-    );
-    if (!payroll) return res.status(404).json({ message: 'Payroll tidak ditemukan' });
-    if (payroll.status !== 'DRAFT') {
-      return res.status(400).json({ message: 'Hanya payroll berstatus DRAFT yang bisa dihapus. Gunakan unpost untuk POSTED.' });
-    }
-
-    await conn.query('DELETE FROM payrolldtl WHERE idpayroll = ? AND idtenant = ?', [req.params.id, ctx.idtenant]);
-    await conn.query('DELETE FROM payroll WHERE idpayroll = ? AND idtenant = ?', [req.params.id, ctx.idtenant]);
-
-    await conn.commit();
-    await logger.history('PAYROLL_CANCEL', {
-      idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser,
-      ref: payroll.kodepayroll, req
-    });
-    res.json({ message: 'Payroll DRAFT berhasil dihapus' });
-  } catch (err) {
-    await conn.rollback();
-    logger.error(err, { req });
-    res.status(500).json({ message: err.message });
-  } finally {
-    conn.release();
-  }
-};
-
-// PUT /payroll/:id/unpost — Batalkan posting (POSTED → DRAFT), hapus jurnal
-exports.unpost = async (req, res) => {
-  const conn = await getConnection();
-  try {
-    const ctx = getTenantContext();
-    await conn.beginTransaction();
-
-    const [[payroll]] = await conn.query(
-      'SELECT * FROM payroll WHERE idpayroll = ? AND idtenant = ? AND idlokasi = ?',
-      [req.params.id, ctx.idtenant, ctx.idlokasi]
-    );
-    if (!payroll) return res.status(404).json({ message: 'Payroll tidak ditemukan' });
-    if (payroll.status !== 'POSTED') {
-      return res.status(400).json({ message: 'Hanya payroll berstatus POSTED yang bisa di-unpost' });
-    }
-
-    // Hapus semua jurnal terkait payroll ini
-    await conn.query(
-      "DELETE FROM jurnal WHERE jenis = 'payroll' AND idtrans = ? AND idtenant = ? AND idlokasi = ?",
-      [req.params.id, ctx.idtenant, ctx.idlokasi]
-    );
-
-    await conn.query(
-      "UPDATE payroll SET status = 'DRAFT', idakun_beban = NULL, idakun_hutang = NULL, idakun_potongan = NULL WHERE idpayroll = ? AND idtenant = ?",
+    const [[gaji]] = await conn.query(
+      'SELECT * FROM gaji WHERE idgaji = ? AND idtenant = ? FOR UPDATE',
       [req.params.id, ctx.idtenant]
     );
-
+    if (!gaji) {
+      await conn.rollback();
+      return res.status(404).json({ message: 'Gaji tidak ditemukan' });
+    }
+    if (!['DRAFT', 'APPROVED'].includes(gaji.status)) {
+      await conn.rollback();
+      return res.status(400).json({ message: `Gaji status ${gaji.status} tidak bisa dibatalkan` });
+    }
+    if (gaji.status === 'APPROVED') {
+      await hapusJurnal(conn, ctx.idtenant, gaji.kodegaji);
+      const absenIds = await getAbsenIdsForGaji(conn, ctx, req.params.id);
+      if (absenIds.length) {
+        await conn.query(
+          "UPDATE absen SET status = 'APPROVED' WHERE idtenant = ? AND idabsen IN (?) AND status = 'CONFIRMED'",
+          [ctx.idtenant, absenIds]
+        );
+      }
+    }
+    await conn.query("UPDATE gaji SET status = 'CANCELLED' WHERE idgaji = ? AND idtenant = ?", [req.params.id, ctx.idtenant]);
     await conn.commit();
-    await logger.history('PAYROLL_UNPOST', {
-      idtenant: ctx.idtenant, idlokasi: ctx.idlokasi, iduser: ctx.iduser,
-      ref: payroll.kodepayroll, req
-    });
-    res.json({ message: 'Payroll berhasil di-unpost kembali ke DRAFT' });
+    await logger.history('GAJI_CANCEL', { idtenant: ctx.idtenant, idlokasi: gaji.idlokasi, iduser: ctx.iduser, ref: gaji.kodegaji, req });
+    res.json({ message: 'Gaji berhasil dibatalkan' });
   } catch (err) {
     await conn.rollback();
     logger.error(err, { req });
-    res.status(500).json({ message: err.message });
+    res.status(err.statusCode || 500).json({ message: err.message });
   } finally {
     conn.release();
   }

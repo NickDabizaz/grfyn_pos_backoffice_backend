@@ -37,9 +37,9 @@ const TRANSACTION_USAGE_SOURCES = [
     dateExpression: "STR_TO_DATE(CONCAT(periodbulan, '-01'), '%Y-%m-%d')",
     statusColumn: 'status',
   },
-  { table: 'absensi', dateColumn: 'tglabsensi' },
+  { table: 'absen', dateColumn: 'tgltrans', statusColumn: 'status' },
   {
-    table: 'payroll',
+    table: 'gaji',
     dateExpression: "STR_TO_DATE(CONCAT(periodbulan, '-01'), '%Y-%m-%d')",
     statusColumn: 'status',
   },

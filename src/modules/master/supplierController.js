@@ -4,6 +4,7 @@
 const { tenantQuery, tenantExecute, getTenantContext, getConnection } = require('../../config/db');
 const { generateKodeMaster } = require('../../lib/kodetrans');
 const logger = require('../../lib/logger');
+const { isForeignKeyConstraintError } = require('../../lib/dbErrors');
 
 // GET /supplier — Menampilkan semua supplier dengan filter pencarian opsional
 exports.getAll = async (req, res) => {
@@ -59,21 +60,30 @@ exports.update = async (req, res) => {
 
 // DELETE /supplier/:id — Menghapus supplier; dicegah jika sudah dipakai di transaksi beli
 exports.remove = async (req, res) => {
+  const conn = await getConnection();
   try {
     const ctx = getTenantContext();
-    const conn = await require('../../config/db').getConnection();
     // Validasi: cek apakah supplier sudah digunakan di transaksi beli
-    let sql = 'SELECT COUNT(*) as cnt FROM beli WHERE idsupplier = ? AND idtenant = ?';
-    const [[{ cnt }]] = await conn.query(sql, [req.params.id, ctx.idtenant]);
-    conn.release();
+    let sql = `SELECT
+      (SELECT COUNT(*) FROM beli WHERE idsupplier = ? AND idtenant = ?)
+      + (SELECT COUNT(*) FROM purchaseorder WHERE idsupplier = ? AND idtenant = ?)
+      + (SELECT COUNT(*) FROM returbeli WHERE idsupplier = ? AND idtenant = ?)
+      + (SELECT COUNT(*) FROM kartuhutang WHERE idsupplier = ? AND idtenant = ?) as cnt`;
+    const params = [req.params.id, ctx.idtenant];
+    const [[{ cnt }]] = await conn.query(sql, [...params, ...params, ...params, ...params]);
     if (cnt > 0) {
-      return res.status(400).json({ message: 'Supplier sudah digunakan di transaksi. Nonaktifkan saja.' });
+      return res.status(400).json({ message: 'Supplier tidak dapat dihapus karena sudah terdapat transaksi atau referensi atas supplier tersebut. Nonaktifkan saja.' });
     }
     let sql2 = 'DELETE FROM supplier WHERE idsupplier = ? AND idtenant = ?';
     await tenantExecute(sql2, [req.params.id, ctx.idtenant]);
     res.json({ message: 'Supplier berhasil dihapus' });
   } catch (err) {
+    if (isForeignKeyConstraintError(err)) {
+      return res.status(400).json({ message: 'Supplier tidak dapat dihapus karena sudah terdapat transaksi atau referensi atas supplier tersebut. Nonaktifkan saja.' });
+    }
     logger.error(err, { req });
     res.status(500).json({ message: err.message });
+  } finally {
+    conn.release();
   }
 };

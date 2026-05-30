@@ -7,6 +7,7 @@ const {
   seedDefaultCOA,
   seedDefaultCustomer,
   seedDefaultJurnalSettings,
+  seedDefaultJenisAbsensi,
 } = require('./src/migrate');
 
 const DEMO_USER = {
@@ -192,6 +193,7 @@ async function ensureAccess(conn, iduser, idlokasi) {
 async function seedDemoMasterData(conn, idtenant, iduser) {
   await seedDefaultCOA(conn, idtenant, iduser);
   await seedDefaultCustomer(conn, idtenant, iduser);
+  await seedDefaultJenisAbsensi(conn, idtenant, iduser);
 
   await conn.query(
     `INSERT INTO customer (idtenant, kodecustomer, namacustomer, alamat, hp, status, userentry)

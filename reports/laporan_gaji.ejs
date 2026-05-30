@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>Laporan Penggajian</title>
+  <link rel="stylesheet" href="/reports/laporan_style.css">
+  <style>
+    @media print { .no-print { display: none; } }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #D7CAC1; padding: 7px; font-size: 11px; }
+    .right { text-align: right; }
+    .center { text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="text-align:right;margin-bottom:10px;">
+    <button onclick="window.print()" style="padding:8px 16px;background:#C4683D;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;">Cetak</button>
+  </div>
+
+  <div class="report-header">
+    <% if (logo) { %><img class="logo" src="<%= logo %>" alt="Logo"><% } %>
+    <h2><%= namatoko %></h2>
+    <p class="subtitle"><%= alamat %> | <%= hp %></p>
+    <h3>LAPORAN PENGGAJIAN</h3>
+  </div>
+
+  <div class="report-meta">
+    <span>Periode: <span class="periode"><%= tglwal %> s/d <%= tglakhir %></span></span>
+    <span>Tanggal Cetak: <%= tglcetak %></span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th class="center">No</th>
+        <th>Periode</th>
+        <th>Kode Gaji</th>
+        <th>Lokasi</th>
+        <th>Karyawan</th>
+        <th class="center">Absen</th>
+        <th class="center">Potong</th>
+        <th class="right">Gaji</th>
+        <th class="right">Bonus</th>
+        <th class="right">Total</th>
+        <th class="right">Cash</th>
+        <th class="right">Bank</th>
+        <th>Catatan</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% let no = 0; %>
+      <% groups.forEach(function(group) { no++; %>
+        <% group.items.forEach(function(item, idx) { %>
+        <tr>
+          <% if (idx === 0) { %>
+            <td class="center" rowspan="<%= group.items.length %>"><%= no %></td>
+            <td rowspan="<%= group.items.length %>"><%= group.periodbulan %></td>
+            <td rowspan="<%= group.items.length %>"><%= group.kodegaji %></td>
+            <td rowspan="<%= group.items.length %>"><%= group.namalokasi || '-' %></td>
+          <% } %>
+          <td><%= item.kodekaryawan %> - <%= item.namakaryawan %></td>
+          <td class="center"><%= item.totalabsen %></td>
+          <td class="center"><%= item.totalpotongabsen %></td>
+          <td class="right"><%= item.gaji.toLocaleString('id-ID') %></td>
+          <td class="right"><%= item.bonus.toLocaleString('id-ID') %></td>
+          <td class="right"><%= item.total.toLocaleString('id-ID') %></td>
+          <td class="right"><%= item.bayarcash.toLocaleString('id-ID') %></td>
+          <td class="right"><%= item.bayarbank.toLocaleString('id-ID') %></td>
+          <td><%= item.catatan || '-' %></td>
+        </tr>
+        <% }); %>
+        <tr style="background:#FAEFE5;font-weight:700;">
+          <td colspan="7">Subtotal <%= group.kodegaji %></td>
+          <td class="right"><%= group.totalgaji.toLocaleString('id-ID') %></td>
+          <td class="right"><%= group.totalbonus.toLocaleString('id-ID') %></td>
+          <td class="right"><%= group.total.toLocaleString('id-ID') %></td>
+          <td class="right"><%= group.totalcash.toLocaleString('id-ID') %></td>
+          <td class="right"><%= group.totalbank.toLocaleString('id-ID') %></td>
+          <td></td>
+        </tr>
+      <% }); %>
+      <% if (!groups.length) { %>
+        <tr><td colspan="13" class="center">Tidak ada data</td></tr>
+      <% } %>
+    </tbody>
+    <tfoot>
+      <tr style="background:#C4683D;color:#fff;font-weight:700;">
+        <td colspan="9">GRAND TOTAL</td>
+        <td class="right"><%= grandTotal.toLocaleString('id-ID') %></td>
+        <td colspan="3"></td>
+      </tr>
+    </tfoot>
+  </table>
+</body>
+</html>

@@ -6,6 +6,7 @@ const { generateKodeMaster } = require('../../lib/kodetrans');
 const { setConfigValue } = require('../../lib/confighelper');
 const logger = require('../../lib/logger');
 const { seedDefaultCOA, seedDefaultJurnalSettings } = require('../../migrate');
+const { isForeignKeyConstraintError } = require('../../lib/dbErrors');
 
 // Pemetaan field request (snake_case) -> nama config jurnal pada tabel `config`
 const JURNAL_SETTING_FIELDS = {
@@ -110,22 +111,30 @@ exports.update = async (req, res) => {
 
 // DELETE /akun/:id — Menghapus akun; dicegah jika sudah dipakai di jurnal
 exports.remove = async (req, res) => {
+  const conn = await getConnection();
   try {
     const ctx         = getTenantContext();
-    const conn        = await getConnection();
     // Validasi: cek apakah akun sudah digunakan di tabel jurnal
-    let sql = 'SELECT COUNT(*) as cnt FROM jurnal WHERE idakun = ? AND idtenant = ?';
-    const [[{ cnt }]] = await conn.query(sql, [req.params.id, ctx.idtenant]);
-    conn.release();
+    let sql = `SELECT
+      (SELECT COUNT(*) FROM jurnal WHERE idakun = ? AND idtenant = ?)
+      + (SELECT COUNT(*) FROM kasdtl WHERE idakun = ? AND idtenant = ?)
+      + (SELECT COUNT(*) FROM anggarandtl WHERE idakun = ? AND idtenant = ?) as cnt`;
+    const params = [req.params.id, ctx.idtenant];
+    const [[{ cnt }]] = await conn.query(sql, [...params, ...params, ...params]);
     if (cnt > 0) {
-      return res.status(400).json({ message: 'Akun sudah digunakan di jurnal. Nonaktifkan saja.' });
+      return res.status(400).json({ message: 'Akun tidak dapat dihapus karena sudah terdapat transaksi atau referensi atas akun tersebut. Nonaktifkan saja.' });
     }
     let sql2 = 'DELETE FROM akun WHERE idakun = ? AND idtenant = ?';
     await tenantExecute(sql2, [req.params.id, ctx.idtenant]);
     res.json({ message: 'Akun berhasil dihapus' });
   } catch (err) {
+    if (isForeignKeyConstraintError(err)) {
+      return res.status(400).json({ message: 'Akun tidak dapat dihapus karena sudah terdapat transaksi atau referensi atas akun tersebut. Nonaktifkan saja.' });
+    }
     logger.error(err, { req });
     res.status(500).json({ message: err.message });
+  } finally {
+    conn.release();
   }
 };
 

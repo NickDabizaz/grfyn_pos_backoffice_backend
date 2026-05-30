@@ -8,7 +8,7 @@ require('dotenv').config();
 const logger = require('../../lib/logger');
 const { setConfigValue, getConfigValue } = require('../../lib/confighelper');
 const { getMenuAccess } = require('../../lib/access');
-const { seedDefaultCOA, seedDefaultCustomer, seedDefaultJurnalSettings } = require('../../migrate');
+const { seedDefaultCOA, seedDefaultCustomer, seedDefaultJurnalSettings, seedDefaultJenisAbsensi } = require('../../migrate');
 
 function upperOrNull(value) {
   if (value === undefined || value === null || value === '') return null;
@@ -262,6 +262,7 @@ exports.register = async (req, res) => {
     // 7. Seed default Chart of Accounts agar jurnaling berfungsi sejak awal
     await seedDefaultCOA(conn, idtenant, iduser);
     await seedDefaultCustomer(conn, idtenant, iduser);
+    await seedDefaultJenisAbsensi(conn, idtenant, iduser);
 
     await setConfigValue(conn, idtenant, 'GLOBAL', 'CEKMINUS', 'TIDAK', 1);
     await setConfigValue(conn, idtenant, 'BARANG', 'PAKAIBAHANBAKU', 'YA', 1);

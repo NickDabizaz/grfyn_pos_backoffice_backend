@@ -6,8 +6,27 @@ const { generateKodeMaster } = require('../../lib/kodetrans');
 const { isPakaiBahanBakuEnabled } = require('../../lib/confighelper');
 const logger = require('../../lib/logger');
 const { getTenantUploadUrl, removeUploadFile } = require('../../lib/uploadPaths');
+const { isForeignKeyConstraintError } = require('../../lib/dbErrors');
 
 const JENIS_OPTIONS = ['BAHAN BAKU', 'BAHAN SETENGAH JADI', 'BARANG JADI'];
+
+const BARANG_TRANSACTION_EXISTS_SQL = `
+  EXISTS (SELECT 1 FROM kartustok ks WHERE ks.idtenant = b.idtenant AND ks.idbarang = b.idbarang LIMIT 1)
+  OR EXISTS (SELECT 1 FROM jualdtl jd WHERE jd.idtenant = b.idtenant AND jd.idbarang = b.idbarang LIMIT 1)
+  OR EXISTS (SELECT 1 FROM belidtl bd WHERE bd.idtenant = b.idtenant AND bd.idbarang = b.idbarang LIMIT 1)
+  OR EXISTS (SELECT 1 FROM returjualdtl rjd WHERE rjd.idtenant = b.idtenant AND rjd.idbarang = b.idbarang LIMIT 1)
+  OR EXISTS (SELECT 1 FROM returbelidtl rbd WHERE rbd.idtenant = b.idtenant AND rbd.idbarang = b.idbarang LIMIT 1)
+  OR EXISTS (SELECT 1 FROM salesorderdtl sod WHERE sod.idtenant = b.idtenant AND sod.idbarang = b.idbarang LIMIT 1)
+  OR EXISTS (SELECT 1 FROM bpkdtl bpkd WHERE bpkd.idtenant = b.idtenant AND bpkd.idbarang = b.idbarang LIMIT 1)
+  OR EXISTS (SELECT 1 FROM purchaseorderdtl pod WHERE pod.idtenant = b.idtenant AND pod.idbarang = b.idbarang LIMIT 1)
+  OR EXISTS (SELECT 1 FROM bpbdtl bpbd WHERE bpbd.idtenant = b.idtenant AND bpbd.idbarang = b.idbarang LIMIT 1)
+  OR EXISTS (SELECT 1 FROM transferstokdtl tsd WHERE tsd.idtenant = b.idtenant AND tsd.idbarang = b.idbarang LIMIT 1)
+  OR EXISTS (SELECT 1 FROM penyesuaianstokdtl psd WHERE psd.idtenant = b.idtenant AND psd.idbarang = b.idbarang LIMIT 1)
+  OR EXISTS (SELECT 1 FROM saldostokdtl ssd WHERE ssd.idtenant = b.idtenant AND ssd.idbarang = b.idbarang LIMIT 1)
+  OR EXISTS (SELECT 1 FROM stockopnamedtl sodtl WHERE sodtl.idtenant = b.idtenant AND sodtl.idbarang = b.idbarang LIMIT 1)
+  OR EXISTS (SELECT 1 FROM produksidtl pd WHERE pd.idtenant = b.idtenant AND pd.idbarang = b.idbarang LIMIT 1)
+  OR EXISTS (SELECT 1 FROM hitunghppdtl hpd WHERE hpd.idtenant = b.idtenant AND hpd.idbarang = b.idbarang LIMIT 1)
+`;
 
 function normalizeText(value) {
   return String(value || '').trim().toUpperCase();
@@ -71,6 +90,14 @@ function validateAndNormalizeBarangPayload(body, { pakaiBahanBaku }) {
   };
 }
 
+function hasBarangUnitChanged(current, next) {
+  return normalizeText(current.satuanbesar) !== normalizeText(next.satuanbesar)
+    || normalizeText(current.satuansedang) !== normalizeText(next.satuansedang)
+    || normalizeText(current.satuankecil) !== normalizeText(next.satuankecil)
+    || Number(current.konversi1 || 1) !== Number(next.konversi1 || 1)
+    || Number(current.konversi2 || 1) !== Number(next.konversi2 || 1);
+}
+
 // GET /barang — Menampilkan semua barang dengan harga beli/jual terbaru dan stok dari kartustok
 exports.getAll = async (req, res) => {
   try {
@@ -79,6 +106,7 @@ exports.getAll = async (req, res) => {
     let sql = `SELECT b.*,
       (SELECT hargabeli FROM hargabeli WHERE idbarang = b.idbarang AND idtenant = ? AND status = 'AKTIF' ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1) as hargabeli_terbaru,
       (SELECT hargajual FROM hargajual WHERE idbarang = b.idbarang AND idtenant = ? ORDER BY tgltrans DESC, idhargajual DESC LIMIT 1) as hargajual_terbaru,
+      CASE WHEN ${BARANG_TRANSACTION_EXISTS_SQL} THEN 1 ELSE 0 END as has_transaksi,
       COALESCE(SUM(CASE WHEN ks.jenis='M' THEN ks.jml ELSE -ks.jml END), 0) as stok
     FROM barang b
     LEFT JOIN kartustok ks ON ks.idbarang = b.idbarang AND ks.idtenant = ?
@@ -147,6 +175,7 @@ exports.getOne = async (req, res) => {
     let sql = `SELECT b.*,
       (SELECT hargabeli FROM hargabeli WHERE idbarang = b.idbarang AND idtenant = ? AND status = 'AKTIF' ORDER BY tgltrans DESC, idhargabeli DESC LIMIT 1) as hargabeli_terbaru,
       (SELECT hargajual FROM hargajual WHERE idbarang = b.idbarang AND idtenant = ? ORDER BY tgltrans DESC, idhargajual DESC LIMIT 1) as hargajual_terbaru,
+      CASE WHEN ${BARANG_TRANSACTION_EXISTS_SQL} THEN 1 ELSE 0 END as has_transaksi,
       COALESCE(SUM(CASE WHEN ks.jenis='M' THEN ks.jml ELSE -ks.jml END), 0) as stok
     FROM barang b
     LEFT JOIN kartustok ks ON ks.idbarang = b.idbarang AND ks.idtenant = ?
@@ -244,6 +273,15 @@ exports.update = async (req, res) => {
       return res.status(404).json({ message: 'Barang tidak ditemukan' });
     }
 
+    const [[transactionUsage]] = await conn.query(
+      `SELECT CASE WHEN ${BARANG_TRANSACTION_EXISTS_SQL} THEN 1 ELSE 0 END as has_transaksi FROM barang b WHERE b.idbarang = ? AND b.idtenant = ?`,
+      [id, ctx.idtenant]
+    );
+    if (transactionUsage?.has_transaksi && hasBarangUnitChanged(barang[0], normalized.data)) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Satuan tidak dapat diubah karena barang sudah memiliki transaksi.' });
+    }
+
     // Update data barang — gunakan nilai lama jika field tidak dikirim (?? untuk null-check, || untuk falsy)
     const [[sameName]] = await conn.query(
       'SELECT idbarang FROM barang WHERE idtenant = ? AND namabarang = ? AND idbarang <> ? LIMIT 1',
@@ -306,14 +344,44 @@ exports.update = async (req, res) => {
 
 // DELETE /barang/:id — Menghapus barang berdasarkan ID
 exports.remove = async (req, res) => {
+  const conn = await getConnection();
   try {
     const ctx = getTenantContext();
-    let sql = 'DELETE FROM barang WHERE idbarang = ? AND idtenant = ?';
-    await tenantExecute(sql, [req.params.id, ctx.idtenant]);
+    const { id } = req.params;
+
+    const [[barang]] = await conn.query(
+      'SELECT idbarang FROM barang WHERE idbarang = ? AND idtenant = ?',
+      [id, ctx.idtenant]
+    );
+    if (!barang) return res.status(404).json({ message: 'Barang tidak ditemukan' });
+
+    const [[transactionUsage]] = await conn.query(
+      `SELECT CASE WHEN ${BARANG_TRANSACTION_EXISTS_SQL} THEN 1 ELSE 0 END as has_transaksi FROM barang b WHERE b.idbarang = ? AND b.idtenant = ?`,
+      [id, ctx.idtenant]
+    );
+    if (transactionUsage?.has_transaksi) {
+      return res.status(400).json({ message: 'Barang tidak dapat dihapus karena sudah terdapat transaksi atas barang tersebut.' });
+    }
+
+    await conn.beginTransaction();
+    await conn.query('DELETE FROM hargabeli WHERE idbarang = ? AND idtenant = ?', [id, ctx.idtenant]);
+    await conn.query('DELETE FROM hargajual WHERE idbarang = ? AND idtenant = ?', [id, ctx.idtenant]);
+    await conn.query('DELETE FROM hargajual_leveldtl WHERE idbarang = ? AND idtenant = ?', [id, ctx.idtenant]);
+    await conn.query('DELETE FROM promodtl WHERE idbarang = ? AND idtenant = ?', [id, ctx.idtenant]);
+    await conn.query('DELETE FROM promobarang_gratis WHERE idbarang = ? AND idtenant = ?', [id, ctx.idtenant]);
+    await conn.query('DELETE FROM diskondtl WHERE idbarang = ? AND idtenant = ?', [id, ctx.idtenant]);
+    await conn.query('DELETE FROM barang WHERE idbarang = ? AND idtenant = ?', [id, ctx.idtenant]);
+    await conn.commit();
     res.json({ message: 'Barang berhasil dihapus' });
   } catch (err) {
+    await conn.rollback();
+    if (isForeignKeyConstraintError(err)) {
+      return res.status(400).json({ message: 'Barang tidak dapat dihapus karena sudah terdapat transaksi atau referensi atas barang tersebut.' });
+    }
     logger.error(err, { req });
     res.status(500).json({ message: err.message });
+  } finally {
+    conn.release();
   }
 };
 

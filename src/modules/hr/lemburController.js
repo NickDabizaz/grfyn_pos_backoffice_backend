@@ -37,7 +37,7 @@ exports.getOne = async (req, res) => {
   try {
     const ctx = getTenantContext();
     const rows = await tenantQuery(
-      `SELECT l.*, k.namakaryawan, k.kodekaryawan, k.jabatan FROM lembur_karyawan l
+      `SELECT l.*, k.namakaryawan, k.kodekaryawan FROM lembur_karyawan l
        LEFT JOIN karyawan k ON l.idkaryawan = k.idkaryawan AND k.idtenant = l.idtenant
        WHERE l.idlembur = ? AND l.idlokasi = ?`,
       [req.params.id, ctx.idlokasi]
@@ -60,7 +60,7 @@ exports.create = async (req, res) => {
     }
 
     const [[kary]] = await conn.query(
-      'SELECT idkaryawan, gajipoko FROM karyawan WHERE idkaryawan = ? AND idtenant = ? AND status = "AKTIF"',
+      'SELECT idkaryawan, gaji FROM karyawan WHERE idkaryawan = ? AND idtenant = ? AND status = "AKTIF"',
       [idkaryawan, ctx.idtenant]
     );
     if (!kary) return res.status(404).json({ message: 'Karyawan tidak ditemukan' });
@@ -68,7 +68,7 @@ exports.create = async (req, res) => {
     const total_jam = calcTotalJam(jam_mulai, jam_selesai);
     const tarifEfektif = tarif_per_jam
       ? parseFloat(tarif_per_jam)
-      : Math.round((parseFloat(kary.gajipoko) / 173) * 1.5 * 100) / 100;
+      : Math.round((parseFloat(kary.gaji || 0) / 173) * 1.5 * 100) / 100;
     const total_bayar = Math.round(total_jam * tarifEfektif * 100) / 100;
 
     await conn.beginTransaction();

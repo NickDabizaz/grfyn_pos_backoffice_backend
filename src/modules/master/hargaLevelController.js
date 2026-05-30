@@ -1,5 +1,6 @@
 const { tenantQuery, tenantExecute, getConnection, getTenantContext } = require('../../config/db');
 const logger = require('../../lib/logger');
+const { isForeignKeyConstraintError } = require('../../lib/dbErrors');
 
 exports.getAll = async (req, res) => {
   try {
@@ -173,6 +174,15 @@ exports.remove = async (req, res) => {
       return res.status(404).json({ message: 'Harga level tidak ditemukan' });
     }
 
+    const [[usage]] = await conn.query(
+      'SELECT COUNT(*) as cnt FROM customer WHERE idhargajuallevel = ? AND idtenant = ?',
+      [id, ctx.idtenant]
+    );
+    if (usage.cnt > 0) {
+      await conn.rollback();
+      return res.status(400).json({ message: 'Harga level tidak dapat dihapus karena sudah digunakan oleh customer. Lepaskan dari customer terlebih dahulu.' });
+    }
+
     await conn.query(
       'DELETE FROM hargajual_leveldtl WHERE idhargajuallevel = ? AND idtenant = ?',
       [id, ctx.idtenant]
@@ -186,6 +196,9 @@ exports.remove = async (req, res) => {
     res.json({ message: 'Harga level berhasil dihapus' });
   } catch (err) {
     await conn.rollback();
+    if (isForeignKeyConstraintError(err)) {
+      return res.status(400).json({ message: 'Harga level tidak dapat dihapus karena sudah terdapat referensi atas harga level tersebut.' });
+    }
     logger.error(err, { req });
     res.status(err.statusCode || 500).json({ message: err.message });
   } finally {

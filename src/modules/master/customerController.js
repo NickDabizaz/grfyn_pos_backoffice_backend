@@ -1,9 +1,10 @@
 // Controller untuk manajemen data customer (pelanggan).
 // Menangani CRUD customer dengan pengecekan referensi transaksi penjualan sebelum penghapusan.
 
-const { tenantQuery, tenantExecute, getTenantContext } = require('../../config/db');
+const { tenantQuery, tenantExecute, getTenantContext, getConnection } = require('../../config/db');
 const { generateKodeMaster } = require('../../lib/kodetrans');
 const logger = require('../../lib/logger');
+const { isForeignKeyConstraintError } = require('../../lib/dbErrors');
 
 // GET /customer — Menampilkan semua customer dengan filter pencarian opsional
 exports.getAll = async (req, res) => {
@@ -56,21 +57,32 @@ exports.update = async (req, res) => {
 
 // DELETE /customer/:id — Menghapus customer; dicegah jika sudah dipakai di transaksi jual
 exports.remove = async (req, res) => {
+  const conn = await getConnection();
   try {
     const ctx = getTenantContext();
-    const conn = await require('../../config/db').getConnection();
     // Validasi: cek apakah customer sudah digunakan di transaksi penjualan
-    let sql = 'SELECT COUNT(*) as cnt FROM jual WHERE idcustomer = ? AND idtenant = ?';
-    const [[{ cnt }]] = await conn.query(sql, [req.params.id, ctx.idtenant]);
-    conn.release();
+    let sql = `SELECT
+      (SELECT COUNT(*) FROM jual WHERE idcustomer = ? AND idtenant = ?)
+      + (SELECT COUNT(*) FROM salesorder WHERE idcustomer = ? AND idtenant = ?)
+      + (SELECT COUNT(*) FROM returjual WHERE idcustomer = ? AND idtenant = ?)
+      + (SELECT COUNT(*) FROM kartupiutang WHERE idcustomer = ? AND idtenant = ?)
+      + (SELECT COUNT(*) FROM poin_customer WHERE idcustomer = ? AND idtenant = ?)
+      + (SELECT COUNT(*) FROM poin_transaksi WHERE idcustomer = ? AND idtenant = ?) as cnt`;
+    const params = [req.params.id, ctx.idtenant];
+    const [[{ cnt }]] = await conn.query(sql, [...params, ...params, ...params, ...params, ...params, ...params]);
     if (cnt > 0) {
-      return res.status(400).json({ message: 'Customer sudah digunakan di transaksi. Nonaktifkan saja.' });
+      return res.status(400).json({ message: 'Customer tidak dapat dihapus karena sudah terdapat transaksi atau referensi atas customer tersebut. Nonaktifkan saja.' });
     }
     let sql2 = 'DELETE FROM customer WHERE idcustomer = ? AND idtenant = ?';
     await tenantExecute(sql2, [req.params.id, ctx.idtenant]);
     res.json({ message: 'Customer berhasil dihapus' });
   } catch (err) {
+    if (isForeignKeyConstraintError(err)) {
+      return res.status(400).json({ message: 'Customer tidak dapat dihapus karena sudah terdapat transaksi atau referensi atas customer tersebut. Nonaktifkan saja.' });
+    }
     logger.error(err, { req });
     res.status(500).json({ message: err.message });
+  } finally {
+    conn.release();
   }
 };
