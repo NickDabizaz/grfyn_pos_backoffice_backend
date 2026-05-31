@@ -7,6 +7,15 @@
 const { tenantQuery, getTenantContext, pool } = require('../../config/db');
 const logger = require('../../lib/logger');
 
+const REPORT_PREVIEW_QUERY_LIMIT = 1000;
+
+function withPreviewLimit(req, sql) {
+  if (req.query.format !== 'html' || req.fullReportExport || /\bLIMIT\s+\d+/i.test(sql)) {
+    return sql;
+  }
+  return `${sql} LIMIT ${REPORT_PREVIEW_QUERY_LIMIT}`;
+}
+
 // GET /api/laporan/jenistransaksi-kartustok
 exports.getJenisTransaksiKartuStok = async (req, res) => {
   try {
@@ -117,9 +126,9 @@ exports.salesTransaksi = async (req, res) => {
       LEFT JOIN kartupiutang kp ON kp.kodetrans = j.kodejual AND kp.jenis = 'JUAL'
       LEFT JOIN pelunasanpiutangdtl ppdtl ON ppdtl.kodetrans = kp.kodetrans
       LEFT JOIN pelunasanpiutang pp ON pp.idpelunasan = ppdtl.idpelunasan
-    WHERE j.status IN ('APPROVED', 'CONFIRMED')`;
+    WHERE j.idtenant = ? AND j.status IN ('APPROVED', 'CONFIRMED')`;
     
-    const params = [];
+    const params = [ctx.idtenant];
 
     // 2. TERAPKAN FILTER PENCARIAN (DYNAMIC QUERY)
     if (tglwal) { 
@@ -163,7 +172,7 @@ exports.salesTransaksi = async (req, res) => {
     sql += ' GROUP BY jdtl.idjualdtl ORDER BY j.tgltrans DESC, j.kodejual DESC, jdtl.idjualdtl ASC';
 
     // 4. EKSEKUSI QUERY
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
 
     // 5. FORMATTING: KELOMPOKKAN ITEM KE DALAM TRANSAKSI MASING-MASING
     const transactions = [];
@@ -312,7 +321,7 @@ exports.salesPerCustomer = async (req, res) => {
     // 3. SORTING (PENTING: Harus urut customer dulu baru kodejual)
     sql += ' ORDER BY c.namacustomer ASC, j.tgltrans DESC, j.kodejual DESC, jdtl.idjualdtl ASC';
 
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
 
     // 4. FORMATTING: Grouping Item ke dalam Transaksi
     const transactions = [];
@@ -445,7 +454,7 @@ exports.salesPerBarang = async (req, res) => {
       }
       sqlDetail += ' ORDER BY b.namabarang ASC, j.tgltrans DESC';
 
-      const detailRows = await tenantQuery(sqlDetail, detailParams);
+      const detailRows = await tenantQuery(withPreviewLimit(req, sqlDetail), detailParams);
       const grandTotal = detailRows.reduce((sum, r) => sum + parseFloat(r.subtotal || 0), 0);
 
       let sqlTenant3 = 'SELECT * FROM tenant WHERE idtenant = ?';
@@ -511,7 +520,7 @@ exports.salesPerBarang = async (req, res) => {
     }
     sql += ' GROUP BY b.idbarang, b.kodebarang, b.namabarang, b.satuankecil ORDER BY total_nilai DESC';
 
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
     const grandTotal = rows.reduce((sum, r) => sum + parseFloat(r.total_nilai || 0), 0);
     res.json({ data: rows, grandTotal });
   } catch (err) {
@@ -540,7 +549,7 @@ exports.pembelian = async (req, res) => {
     }
     sql += ' ORDER BY b.tgltrans DESC, b.idbeli DESC';
 
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
     const totalPembelian = rows.reduce((sum, r) => sum + parseFloat(r.grandtotal || 0), 0);
 
     if (format === 'html') {
@@ -567,7 +576,7 @@ exports.pembelian = async (req, res) => {
       }
       sqlDetail += ' ORDER BY b.tgltrans DESC, b.idbeli DESC, bd.idbelidtl ASC';
 
-      const detailRows = await tenantQuery(sqlDetail, detailParams);
+      const detailRows = await tenantQuery(withPreviewLimit(req, sqlDetail), detailParams);
 
       // Kelompokkan item ke dalam transaksi masing-masing
       const transactions = [];
@@ -677,7 +686,7 @@ exports.salesPerLokasi = async (req, res) => {
       }
       sqlDetail += ' ORDER BY l.namalokasi ASC, j.tgltrans DESC, j.kodejual DESC, jd.idjualdtl ASC';
 
-      const detailRows = await tenantQuery(sqlDetail, detailParams);
+      const detailRows = await tenantQuery(withPreviewLimit(req, sqlDetail), detailParams);
 
       // Grouping item ke dalam transaksi
       const transactions = [];
@@ -773,7 +782,7 @@ exports.salesPerLokasi = async (req, res) => {
     }
     sql += ' GROUP BY l.idlokasi, l.kodelokasi, l.namalokasi ORDER BY total_penjualan DESC';
 
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
     const grandTotal = rows.reduce((sum, r) => sum + parseFloat(r.total_penjualan || 0), 0);
     res.json({ data: rows, grandTotal });
   } catch (err) {
@@ -807,7 +816,7 @@ exports.pembelianPerSupplier = async (req, res) => {
     }
     sql += ' GROUP BY s.idsupplier, s.kodesupplier, s.namasupplier ORDER BY total_pembelian DESC';
 
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
     const grandTotal = rows.reduce((sum, r) => sum + parseFloat(r.total_pembelian || 0), 0);
 
     if (format === 'html') {
@@ -832,7 +841,7 @@ exports.pembelianPerSupplier = async (req, res) => {
       }
       sqlDetail += ' ORDER BY s.namasupplier ASC, b.tgltrans DESC, b.kodebeli DESC, bd.idbelidtl ASC';
 
-      const detailRows = await tenantQuery(sqlDetail, detailParams);
+      const detailRows = await tenantQuery(withPreviewLimit(req, sqlDetail), detailParams);
       const grandTotal = detailRows.reduce((sum, r) => sum + parseFloat(r.grandtotal || 0), 0);
 
       // Grouping item ke dalam transaksi masing-masing
@@ -910,7 +919,7 @@ exports.pembelianPerLokasi = async (req, res) => {
       if (tglakhir) { sqlDetail += ' AND bl.tgltrans <= ?'; detailParams.push(tglakhir); }
       sqlDetail += ' ORDER BY l.namalokasi ASC, bl.tgltrans DESC, bl.kodebeli DESC, bd.idbelidtl ASC';
 
-      const detailRows = await tenantQuery(sqlDetail, detailParams);
+      const detailRows = await tenantQuery(withPreviewLimit(req, sqlDetail), detailParams);
 
       // Grouping item ke dalam transaksi
       const transactions = [];
@@ -970,7 +979,7 @@ exports.pembelianPerLokasi = async (req, res) => {
     sql += ' WHERE l.idtenant = ? GROUP BY l.idlokasi, l.kodelokasi, l.namalokasi ORDER BY total_pembelian DESC';
     params.push(ctx.idtenant);
 
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
     const grandTotal = rows.reduce((sum, r) => sum + parseFloat(r.total_pembelian || 0), 0);
     res.json({ data: rows, grandTotal });
   } catch (err) {
@@ -1007,7 +1016,7 @@ exports.pembelianPerBarang = async (req, res) => {
       if (detailConds.length) sqlDetail += ' AND ' + detailConds.join(' AND ');
       sqlDetail += ' ORDER BY b.namabarang ASC, bl.tgltrans DESC';
 
-      const detailRows = await tenantQuery(sqlDetail, detailParams);
+      const detailRows = await tenantQuery(withPreviewLimit(req, sqlDetail), detailParams);
       const grandTotal = detailRows.reduce((sum, r) => sum + parseFloat(r.subtotal || 0), 0);
 
       let sqlTenant8 = 'SELECT * FROM tenant WHERE idtenant = ?';
@@ -1040,7 +1049,7 @@ exports.pembelianPerBarang = async (req, res) => {
     if (conditions.length > 0) { sql += ' WHERE ' + conditions.join(' AND '); }
     sql += ' GROUP BY b.idbarang, b.kodebarang, b.namabarang, b.satuankecil ORDER BY total_nilai DESC';
 
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
     const grandTotal = rows.reduce((sum, r) => sum + parseFloat(r.total_nilai || 0), 0);
     res.json({ data: rows, grandTotal });
   } catch (err) {
@@ -1069,7 +1078,7 @@ exports.pembelianRekap = async (req, res) => {
       if (clause) { sql += ' AND ' + clause; params.push(...p); }
     }
 
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
 
     if (req.query.format === 'html') {
       let sqlTenant9 = 'SELECT * FROM tenant WHERE idtenant = ?';
@@ -1132,7 +1141,7 @@ exports.stok = async (req, res) => {
       params.push(ctx.idtenant, ctx.idlokasi, ctx.idtenant, ctx.idlokasi);
     }
 
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
     const totalBarang = rows.length;
     const totalStok = rows.reduce((sum, r) => sum + (parseInt(r.stok) || 0), 0);
 
@@ -1191,7 +1200,7 @@ exports.kartuStok = async (req, res) => {
     }
     sql += ' ORDER BY b.namabarang ASC, ks.tgltrans ASC, ks.idkartustok ASC';
 
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
     const selectedBarangIds = idbarang ? idbarang.split(',').map(s => s.trim()).filter(Boolean) : [];
     const barangIds = [...new Set([...selectedBarangIds, ...rows.map(row => String(row.idbarang))])];
     let latestSaldo = null;
@@ -1390,7 +1399,7 @@ exports.stockOpname = async (req, res) => {
     if (idlokasi) { const r = multiIdIn('so.idlokasi', idlokasi); if (r.clause) { sql += ' AND ' + r.clause; params.push(...r.params); } }
     if (idbarang) { const r = multiIdIn('sod.idbarang', idbarang); if (r.clause) { sql += ' AND ' + r.clause; params.push(...r.params); } }
     sql += ' ORDER BY so.tgltrans DESC, so.kodestockopname DESC, b.namabarang ASC';
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
     const mapped = rows.map(r => ({ ...r, status: r.status === 'FINALIZED' || r.status === 'AKTIF' ? 'APPROVED' : r.status }));
     if (format === 'html') {
       const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
@@ -1430,7 +1439,7 @@ exports.transferStok = async (req, res) => {
     if (idlokasitujuan) { const r = multiIdIn('ts.idlokasitujuan', idlokasitujuan); if (r.clause) { sql += ' AND ' + r.clause; params.push(...r.params); } }
     if (idbarang) { const r = multiIdIn('tsd.idbarang', idbarang); if (r.clause) { sql += ' AND ' + r.clause; params.push(...r.params); } }
     sql += ' ORDER BY ts.tgltrans DESC, ts.kodetransferstok DESC, b.namabarang ASC';
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
     const mapped = rows.map(r => ({ ...r, status: ['DIKIRIM', 'DITERIMA', 'KIRIM', 'TERIMA'].includes(r.status) ? 'APPROVED' : r.status === 'DIBATALKAN' ? 'CANCELLED' : r.status }));
     if (format === 'html') {
       const [[tenant]] = await pool.query('SELECT * FROM tenant WHERE idtenant = ?', [ctx.idtenant]);
@@ -1498,7 +1507,7 @@ exports.rekapSales = async (req, res) => {
 
     sql += ' GROUP BY j.kodejual, j.tgltrans, l.namalokasi, c.kodecustomer, c.namacustomer, j.grandtotal, pp.tgltrans, kp.terbayar, kp.sisa ORDER BY j.tgltrans DESC, j.kodejual DESC';
 
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
 
     // Proses hasil query: hitung sisa dan status lunas
     const processed = rows.map(r => {
@@ -1641,7 +1650,7 @@ exports.salesOrder = async (req, res) => {
     if (af.clause) { sql += ' AND ' + af.clause; params.push(...af.params); }
     sql += ' ORDER BY so.tgltrans DESC, so.kodeso DESC, sd.idsodtl ASC';
 
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
     const transactions = [];
     let curKode = null, curGroup = null;
     for (const row of rows) {
@@ -1689,7 +1698,7 @@ exports.bpk = async (req, res) => {
     if (af.clause) { sql += ' AND ' + af.clause; params.push(...af.params); }
     sql += ' ORDER BY bpk.tgltrans DESC, bpk.kodebpk DESC, bd.idbpkdtl ASC';
 
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
     const transactions = [];
     let curKode = null, curGroup = null;
     for (const row of rows) {
@@ -1737,7 +1746,7 @@ exports.returJual = async (req, res) => {
     if (af.clause) { sql += ' AND ' + af.clause; params.push(...af.params); }
     sql += ' ORDER BY rj.tgltrans DESC, rj.kodereturjual DESC, rd.idreturjualdtl ASC';
 
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
     const transactions = [];
     let curKode = null, curGroup = null;
     for (const row of rows) {
@@ -1785,7 +1794,7 @@ exports.purchaseOrder = async (req, res) => {
     if (af.clause) { sql += ' AND ' + af.clause; params.push(...af.params); }
     sql += ' ORDER BY po.tgltrans DESC, po.kodepo DESC, pd.idpodtl ASC';
 
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
     const transactions = [];
     let curKode = null, curGroup = null;
     for (const row of rows) {
@@ -1833,7 +1842,7 @@ exports.bpb = async (req, res) => {
     if (af.clause) { sql += ' AND ' + af.clause; params.push(...af.params); }
     sql += ' ORDER BY bpb.tgltrans DESC, bpb.kodebpb DESC, bd.idbpbdtl ASC';
 
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
     const transactions = [];
     let curKode = null, curGroup = null;
     for (const row of rows) {
@@ -1881,7 +1890,7 @@ exports.returBeli = async (req, res) => {
     if (af.clause) { sql += ' AND ' + af.clause; params.push(...af.params); }
     sql += ' ORDER BY rb.tgltrans DESC, rb.kodereturbeli DESC, rd.idreturbelidtl ASC';
 
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
     const transactions = [];
     let curKode = null, curGroup = null;
     for (const row of rows) {
@@ -1966,7 +1975,7 @@ exports.absen = async (req, res) => {
     if (tglakhir) { sql += ' AND a.tgltrans <= ?'; params.push(tglakhir); }
     sql += ' ORDER BY a.tgltrans ASC, a.kodeabsen ASC, k.namakaryawan ASC';
 
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
     const groups = [];
     let currentKey = null;
     let current = null;
@@ -2038,7 +2047,7 @@ exports.gaji = async (req, res) => {
     if (tglakhir) { sql += ' AND g.tglawal <= ?'; params.push(tglakhir); }
     sql += ' ORDER BY g.periodbulan ASC, g.kodegaji ASC, k.namakaryawan ASC';
 
-    const rows = await tenantQuery(sql, params);
+    const rows = await tenantQuery(withPreviewLimit(req, sql), params);
     const groups = [];
     let currentKey = null;
     let current = null;

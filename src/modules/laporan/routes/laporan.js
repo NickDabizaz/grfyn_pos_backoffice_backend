@@ -2,6 +2,40 @@ const router = require('express').Router();
 const ctrl = require('../laporanController');
 const auth = require('../../../middleware/auth');
 
+const REPORT_PREVIEW_LIMIT = 1000;
+
+function truncateArrays(value, limit, seen = new WeakSet()) {
+  if (!value || typeof value !== 'object' || seen.has(value)) return;
+  seen.add(value);
+
+  if (Array.isArray(value) && value.length > limit) {
+    value.length = limit;
+  }
+
+  Object.values(value).forEach(item => truncateArrays(item, limit, seen));
+}
+
+router.use((req, res, next) => {
+  const isExcelExport = req.query.format === 'xls';
+
+  if (isExcelExport) {
+    const reportName = req.path.replace(/^\/|\/$/g, '').replace(/[^a-z0-9-]+/gi, '-') || 'laporan';
+    req.fullReportExport = true;
+    req.query.format = 'html';
+    res.setHeader('Content-Type', 'application/vnd.ms-excel; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${reportName}.xls"`);
+  } else if (req.query.format === 'html') {
+    const render = res.render.bind(res);
+    res.setHeader('X-Report-Preview-Limit', String(REPORT_PREVIEW_LIMIT));
+    res.render = (view, locals = {}, callback) => {
+      truncateArrays(locals, REPORT_PREVIEW_LIMIT);
+      return render(view, locals, callback);
+    };
+  }
+
+  next();
+});
+
 router.get('/sales-transaksi', auth, ctrl.salesTransaksi);
 router.get('/sales-per-customer', auth, ctrl.salesPerCustomer);
 router.get('/sales-per-barang', auth, ctrl.salesPerBarang);
